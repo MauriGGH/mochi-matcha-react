@@ -1,0 +1,160 @@
+/* =============================================
+   Mochi Matcha — Design Tokens & Global Styles
+   ============================================= */
+
+:root {
+  /* Brand */
+  --mm-green:        #3D6B4F;
+  --mm-green-light:  #5A8F6B;
+  --mm-green-pale:   #E8F2EC;
+  --mm-green-dark:   #2A4A36;
+
+  --mm-gold:         #C9933A;
+  --mm-gold-light:   #F0C97A;
+  --mm-gold-pale:    #FDF3E0;
+
+  --mm-cream:        #FAF8F4;
+  --mm-cream-dark:   #F0EDE8;
+  --mm-brown:        #6B4F3A;
+
+  /* Neutrals */
+  --mm-text:         #1C2A1E;
+  --mm-text-muted:   #6B7B6E;
+  --mm-border:       #D6E4DA;
+  --mm-white:        #FFFFFF;
+
+  /* Status */
+  --mm-success:      #2E7D52;
+  --mm-warning:      #C0851A;
+  --mm-danger:       #C0392B;
+  --mm-info:         #1A6A8A;
+
+  /* KDS semáforo */
+  --kds-green:       #27AE60;
+  --kds-yellow:      #F39C12;
+  --kds-red:         #E74C3C;
+
+  /* Typography */
+  --font-display:    'Playfair Display', Georgia, serif;
+  --font-body:       'DM Sans', 'Segoe UI', sans-serif;
+  --font-mono:       'JetBrains Mono', monospace;
+
+  /* Shadows */
+  --shadow-sm:       0 1px 3px rgba(28,42,30,.08);
+  --shadow-md:       0 4px 12px rgba(28,42,30,.12);
+  --shadow-lg:       0 8px 24px rgba(28,42,30,.16);
+
+  /* Radius */
+  --radius-sm:       8px;
+  --radius-md:       12px;
+  --radius-lg:       16px;
+  --radius-xl:       24px;
+  --radius-pill:     100px;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+body {
+  font-family: var(--font-body);
+  background: var(--mm-cream);
+  color: var(--mm-text);
+  -webkit-font-smoothing: antialiased;
+  margin: 0;
+}
+
+/* ---- Bootstrap overrides ---- */
+.btn-primary {
+  background: var(--mm-green) !important;
+  border-color: var(--mm-green) !important;
+  color: #fff !important;
+  border-radius: var(--radius-pill) !important;
+  font-weight: 600;
+  padding: .625rem 1.5rem;
+  transition: all .2s ease;
+}
+.btn-primary:hover, .btn-primary:focus {
+  background: var(--mm-green-dark) !important;
+  border-color: var(--mm-green-dark) !important;
+}
+.btn-outline-primary {
+  color: var(--mm-green) !important;
+  border-color: var(--mm-green) !important;
+  border-radius: var(--radius-pill) !important;
+  font-weight: 600;
+  transition: all .2s ease;
+}
+.btn-outline-primary:hover {
+  background: var(--mm-green) !important;
+  color: #fff !important;
+}
+.btn-gold {
+  background: var(--mm-gold);
+  border-color: var(--mm-gold);
+  color: #fff;
+  border-radius: var(--radius-pill);
+  font-weight: 600;
+  padding: .625rem 1.5rem;
+  transition: all .2s ease;
+}
+.btn-gold:hover { background: #a97930; border-color: #a97930; color: #fff; }
+
+.card {
+  border: 1px solid var(--mm-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+  background: var(--mm-white);
+}
+
+/* ---- Toast ---- */
+.mm-toast-container {
+  position: fixed;
+  bottom: 1.5rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  gap: .5rem;
+  pointer-events: none;
+  align-items: center;
+}
+.mm-toast {
+  background: var(--mm-text);
+  color: #fff;
+  border-radius: var(--radius-md);
+  padding: .75rem 1.25rem;
+  font-size: .875rem;
+  font-weight: 500;
+  box-shadow: var(--shadow-lg);
+  animation: toastIn .25s ease;
+  white-space: nowrap;
+}
+.mm-toast.success { background: var(--mm-success); }
+.mm-toast.error   { background: var(--mm-danger); }
+.mm-toast.warning { background: var(--mm-warning); }
+
+@keyframes toastIn {
+  from { opacity:0; transform:translateY(8px); }
+  to   { opacity:1; transform:translateY(0); }
+}
+
+/* ---- Utility ---- */
+.text-green     { color: var(--mm-green) !important; }
+.text-gold      { color: var(--mm-gold) !important; }
+.text-muted-mm  { color: var(--mm-text-muted) !important; }
+.bg-green-pale  { background: var(--mm-green-pale) !important; }
+.bg-cream       { background: var(--mm-cream) !important; }
+.font-display   { font-family: var(--font-display) !important; }
+
+/* ---- Badge promo ---- */
+.badge-promo {
+  background: var(--mm-gold-pale);
+  color: var(--mm-gold);
+  border: 1px solid var(--mm-gold-light);
+  border-radius: var(--radius-pill);
+  font-size: .7rem;
+  font-weight: 700;
+  padding: .15rem .5rem;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+}
