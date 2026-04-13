@@ -1,0 +1,21 @@
+# Dependencias (¡Lo que bien mencionaste!)
+node_modules/
+
+# Archivos de construcción (generados al empaquetar para producción)
+dist/
+dist-ssr/
+
+# Archivos de entorno (contraseñas, tokens de API que no deben ser públicos)
+.env
+.env.local
+.env.*.local
+
+# Archivos de registro de errores
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Archivos del sistema operativo o editores de código
+.DS_Store
+.vscode/
+.idea/
