@@ -108,7 +108,6 @@ npm run build
 |---------|---------|-----|
 | `react` + `react-dom` | ^18 | Framework UI |
 | `react-router-dom` | ^6 | Ruteo SPA |
-| `axios` | ^1 | Llamadas HTTP a la API Django |
 | `chart.js` + `react-chartjs-2` | ^4 / ^5 | Gráficas en Reportes |
 | `dayjs` | ^1 | Manejo de fechas |
 | `@vitejs/plugin-react` | ^4 | Plugin de React para Vite |
