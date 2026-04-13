@@ -1,6 +1,5 @@
 # 🍵 Mochi Matcha — Frontend React + Vite
 
-Conversión de las vistas del proyecto Django a React con Vite. El backend se integra en pasos posteriores.
 
 ---
 
@@ -100,45 +99,6 @@ npm run build
 | Mesero | `mesero1` | `mesero123` |
 | Gerente | `gerente1` | `gerente123` |
 | Cocina | `cocina1` | `cocina123` |
-
----
-
-## 🔌 Integración con Django (pasos siguientes)
-
-El archivo `vite.config.js` ya incluye un proxy configurado:
-
-```js
-proxy: {
-  '/api': {
-    target: 'http://localhost:8000',  // Tu servidor Django
-    changeOrigin: true,
-  }
-}
-```
-
-### Cómo conectar cada página con la API
-
-En cada página encontrarás comentarios con `// TODO:` indicando exactamente dónde hacer las llamadas. Ejemplo:
-
-```js
-// TODO: reemplazar con llamada real a la API Django
-// const res = await api.post('/mesero/login/', form)
-// login(res.data.user)
-```
-
-Reemplaza los mocks (`MOCK_*`) por llamadas a la API usando `axios` (ya instalado):
-
-```js
-import axios from 'axios'
-
-const api = axios.create({
-  baseURL: '/api',          // proxeado a Django por Vite
-  withCredentials: true,    // para enviar cookies de sesión Django
-})
-
-// Ejemplo:
-const mesas = await api.get('/mesero/mesas/')
-```
 
 ---
 
