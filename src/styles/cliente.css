@@ -1,0 +1,312 @@
+/* =============================================
+   Mochi Matcha — Cliente App Styles
+   ============================================= */
+
+/* ---- Shell ---- */
+html, body { height: 100%; }
+body {
+  background: #2A4A36;
+  display: flex;
+  justify-content: center;
+  align-items: stretch;
+}
+#client-shell {
+  width: 100%;
+  max-width: 430px;
+  min-height: 100vh;
+  background: var(--mm-cream);
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  overflow: hidden;
+  margin: 0 auto;
+}
+#client-content {
+  flex: 1;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: 80px;
+}
+
+/* ---- Bottom Nav ---- */
+.client-bottom-nav {
+  position: sticky;
+  bottom: 0;
+  left: 0; right: 0;
+  height: 72px;
+  background: var(--mm-white);
+  border-top: 1px solid var(--mm-border);
+  display: flex;
+  z-index: 100;
+}
+.client-bottom-nav .nav-item {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  text-decoration: none;
+  color: var(--mm-text-muted);
+  font-size: .7rem;
+  font-weight: 500;
+  position: relative;
+  transition: color .2s;
+  cursor: pointer;
+  border: none;
+  background: none;
+}
+.client-bottom-nav .nav-item i { font-size: 1.25rem; }
+.client-bottom-nav .nav-item.active { color: var(--mm-green); }
+.client-bottom-nav .nav-item.active i {
+  filter: drop-shadow(0 0 6px rgba(61,107,79,.4));
+}
+.nav-badge {
+  position: absolute;
+  top: 6px; right: calc(50% - 18px);
+  background: var(--mm-gold);
+  color: #fff;
+  font-size: .6rem;
+  font-weight: 700;
+  min-width: 16px; height: 16px;
+  border-radius: 99px;
+  display: flex; align-items: center; justify-content: center;
+  padding: 0 4px;
+}
+
+/* ---- Welcome Screen ---- */
+.welcome-hero {
+  background: linear-gradient(160deg, var(--mm-green-dark) 0%, var(--mm-green) 100%);
+  padding: 3rem 1.5rem 2rem;
+  text-align: center;
+  color: #fff;
+}
+.welcome-hero h1 {
+  font-family: var(--font-display);
+  font-size: 2rem;
+  font-weight: 600;
+  margin-bottom: .25rem;
+}
+.welcome-card {
+  margin: -1.5rem 1rem 0;
+  border-radius: var(--radius-xl);
+  background: var(--mm-white);
+  box-shadow: var(--shadow-lg);
+  padding: 1.75rem 1.5rem;
+  position: relative;
+  z-index: 2;
+}
+.mesa-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: .4rem;
+  background: var(--mm-green-pale);
+  color: var(--mm-green);
+  border-radius: var(--radius-pill);
+  padding: .35rem .9rem;
+  font-size: .8rem;
+  font-weight: 600;
+  margin-bottom: 1.25rem;
+}
+
+/* ---- Alias Options ---- */
+.option-card {
+  border: 2px solid var(--mm-border);
+  border-radius: var(--radius-md);
+  padding: 1rem;
+  cursor: pointer;
+  transition: all .2s;
+  text-align: center;
+  text-decoration: none;
+  color: inherit;
+  display: block;
+}
+.option-card:hover, .option-card.selected {
+  border-color: var(--mm-green);
+  background: var(--mm-green-pale);
+}
+.option-card i { font-size: 1.75rem; color: var(--mm-green); margin-bottom: .5rem; }
+
+/* ---- PIN display ---- */
+.pin-display {
+  display: flex;
+  justify-content: center;
+  gap: .75rem;
+  margin: 1rem 0;
+}
+.pin-digit {
+  width: 52px; height: 62px;
+  background: var(--mm-green-pale);
+  border: 2px solid var(--mm-green);
+  border-radius: var(--radius-md);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1.75rem;
+  font-weight: 700;
+  color: var(--mm-green-dark);
+  font-family: var(--font-mono);
+}
+
+/* ---- Category Tabs ---- */
+.category-tabs {
+  display: flex;
+  gap: .5rem;
+  overflow-x: auto;
+  padding: 1rem 1rem .5rem;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.category-tabs::-webkit-scrollbar { display: none; }
+.cat-tab {
+  white-space: nowrap;
+  border: 1.5px solid var(--mm-border);
+  background: var(--mm-white);
+  color: var(--mm-text-muted);
+  border-radius: var(--radius-pill);
+  padding: .4rem .9rem;
+  font-size: .8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all .2s;
+  text-decoration: none;
+  display: inline-block;
+}
+.cat-tab:hover, .cat-tab.active {
+  background: var(--mm-green);
+  border-color: var(--mm-green);
+  color: #fff;
+}
+
+/* ---- Product Card ---- */
+.product-card {
+  background: var(--mm-white);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--mm-border);
+  overflow: hidden;
+  transition: box-shadow .2s, transform .2s;
+  cursor: pointer;
+}
+.product-card:hover { box-shadow: var(--shadow-md); transform: translateY(-2px); }
+.product-img {
+  width: 100%; aspect-ratio: 4/3;
+  object-fit: cover;
+  background: var(--mm-cream-dark);
+}
+.product-img-placeholder {
+  width: 100%; aspect-ratio: 4/3;
+  background: var(--mm-cream-dark);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 2.5rem;
+  color: var(--mm-text-muted);
+}
+.product-body { padding: .75rem; }
+.product-name { font-weight: 600; font-size: .9rem; margin-bottom: .2rem; }
+.product-desc { font-size: .75rem; color: var(--mm-text-muted); margin-bottom: .5rem;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.product-price { font-weight: 700; color: var(--mm-green); font-size: 1rem; }
+.add-btn {
+  width: 32px; height: 32px;
+  background: var(--mm-green);
+  color: #fff;
+  border: none; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1.1rem; font-weight: 700;
+  cursor: pointer; transition: background .2s;
+  flex-shrink: 0;
+}
+.add-btn:hover { background: var(--mm-green-dark); }
+
+/* ---- Quantity Control ---- */
+.qty-control { display: flex; align-items: center; gap: .75rem; }
+.qty-btn {
+  width: 36px; height: 36px;
+  border: 2px solid var(--mm-border);
+  background: var(--mm-white);
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1.1rem; font-weight: 700;
+  cursor: pointer; transition: all .15s;
+  color: var(--mm-text);
+}
+.qty-btn:hover { border-color: var(--mm-green); color: var(--mm-green); }
+.qty-value { font-size: 1.1rem; font-weight: 700; min-width: 24px; text-align: center; }
+
+/* ---- Cart ---- */
+.cart-item {
+  background: var(--mm-white);
+  border: 1px solid var(--mm-border);
+  border-radius: var(--radius-md);
+  padding: 1rem;
+  margin-bottom: .75rem;
+}
+.cart-item-name { font-weight: 600; font-size: .9rem; }
+.cart-item-mods { font-size: .75rem; color: var(--mm-text-muted); margin-top: .25rem; }
+.cart-item-price { font-weight: 700; color: var(--mm-green); }
+.cart-total-bar {
+  background: var(--mm-white);
+  border: 1px solid var(--mm-border);
+  border-radius: var(--radius-md);
+  padding: 1rem 1.25rem;
+}
+
+/* ---- Order Tracking ---- */
+.order-card {
+  background: var(--mm-white);
+  border: 1px solid var(--mm-border);
+  border-radius: var(--radius-md);
+  padding: 1rem;
+  margin-bottom: .75rem;
+}
+.order-status-badge {
+  border-radius: var(--radius-pill);
+  padding: .25rem .75rem;
+  font-size: .75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+.status-recibido  { background: #EBF3FD; color: #2471A3; }
+.status-preparando{ background: #FEF9E7; color: #CA8A04; }
+.status-listo     { background: #EAFAF1; color: #1E8449; }
+.status-entregado { background: #F2F3F4; color: #566573; }
+.status-cancelado { background: #FDEDEC; color: #C0392B; }
+
+/* ---- Progress stepper ---- */
+.order-steps {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  margin: .75rem 0;
+}
+.step-dot {
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  border: 2px solid var(--mm-border);
+  background: var(--mm-white);
+  display: flex; align-items: center; justify-content: center;
+  font-size: .7rem;
+  font-weight: 700;
+  color: var(--mm-text-muted);
+  position: relative;
+  z-index: 1;
+  flex-shrink: 0;
+}
+.step-dot.done { background: var(--mm-green); border-color: var(--mm-green); color: #fff; }
+.step-dot.current { border-color: var(--mm-green); color: var(--mm-green); box-shadow: 0 0 0 3px var(--mm-green-pale); }
+.step-line { flex: 1; height: 2px; background: var(--mm-border); }
+.step-line.done { background: var(--mm-green); }
+
+/* ---- Modifier option ---- */
+.modifier-option {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: .6rem .75rem;
+  border: 1.5px solid var(--mm-border);
+  border-radius: var(--radius-sm);
+  margin-bottom: .4rem;
+  cursor: pointer;
+  transition: all .15s;
+}
+.modifier-option.selected {
+  border-color: var(--mm-green);
+  background: var(--mm-green-pale);
+}
+.modifier-extra { font-size: .75rem; color: var(--mm-gold); font-weight: 600; }
