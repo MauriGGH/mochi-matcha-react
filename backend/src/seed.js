@@ -1,5 +1,5 @@
 /**
- * Seed completo — espejo exacto de los datos del proyecto Django Mochi Matcha.
+ * 
  * Pobla catálogos (modalidades, métodos de pago, estados, tipos de descuento),
  * empleados, ubicaciones, mesas con QR, categorías, productos, grupos de
  * modificadores con opciones y promociones de ejemplo. Usa findOrCreate
