@@ -1,0 +1,253 @@
+{# ============================================================================= #}
+{# bienvenida.html — Punto de entrada del cliente tras escanear el QR de mesa. #}
+{# Maneja múltiples estados (steps) en una sola vista:                          #}
+{#   error_mesa    → QR sin parámetro de mesa (acceso directo inválido)         #}
+{#   pin_generado  → Sesión nueva creada; muestra el PIN para compartir         #}
+{#   libre/nuevo   → Mesa libre o flujo "Soy nuevo": formulario de alias        #}
+{#   ocupada       → Mesa en uso: elegir entre "Soy nuevo" o "Ya tengo cuenta"  #}
+{#   recuperar     → Recuperar sesión existente con alias + PIN                 #}
+{# El header y el nav inferior se suprimen para dar experiencia de splash.      #}
+{# ============================================================================= #}
+{% extends "base/cliente_base.html" %}
+{% load static %}
+
+{# Título dinámico según si hay mesa identificada #}
+{% block title %}Bienvenido — {% if mesa %}Mesa {{ mesa.numero_mesa }}{% else %}Mochi Matcha{% endif %}{% endblock %}
+
+{# Suprime header y nav: la bienvenida es una pantalla de onboarding full-screen #}
+{% block client_header %}{% endblock %}
+{% block bottom_nav %}{% endblock %}
+
+{% block content %}
+
+{# ── Caso: URL sin parámetro de mesa (acceso directo, no por QR) ── #}
+{% if error_mesa %}
+<!-- Sin mesa especificada -->
+<div class="welcome-hero" style="min-height:100vh; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:2rem;">
+  <i class="bi bi-cup-hot-fill text-white" style="font-size:3.5rem; margin-bottom:1rem; display:block;"></i>
+  <h2 class="fw-bold text-white mb-2" style="font-family:var(--font-display);">Mochi Matcha</h2>
+  <p class="text-white opacity-75 mb-0">Escanea el código QR de tu mesa para continuar</p>
+</div>
+
+{# ── Caso: la mesa tiene cuentas pagadas que el mesero aún no ha cerrado ── #}
+{% elif step == 'mesa_cerrando' %}
+<!-- ── Pantalla: mesa en proceso de cierre ── -->
+<div class="welcome-hero" style="padding:2.5rem 1.5rem 2rem;">
+  <i class="bi bi-clock-history text-white" style="font-size:3rem; margin-bottom:.5rem; display:block;"></i>
+  <h2 class="fw-bold text-white mb-0" style="font-family:var(--font-display); font-size:1.75rem;">Mochi Matcha</h2>
+</div>
+
+<div class="welcome-card mx-3" style="margin-top:-1.5rem;">
+  <div class="text-center mb-3">
+    <span class="mesa-badge"><i class="bi bi-geo-alt-fill"></i> Mesa {{ mesa.numero_mesa }}{% if mesa.ubicacion %} · {{ mesa.ubicacion }}{% endif %}</span>
+  </div>
+
+  <div class="text-center py-2">
+    <i class="bi bi-hourglass-split" style="font-size:2.5rem; color:var(--mm-green); margin-bottom:1rem; display:block;"></i>
+    <h5 class="fw-bold mb-2">Mesa en proceso de cierre</h5>
+    <p style="font-size:.875rem; color:var(--mm-text-muted); margin-bottom:1.5rem;">
+      Esta mesa está siendo atendida por el mesero. Por favor espera a que el personal la habilite para nuevos comensales.
+    </p>
+    <p style="font-size:.8rem; color:var(--mm-text-muted);">
+      Si ya tienes una sesión activa en otra mesa, escanea el código QR correspondiente o solicita asistencia al personal.
+    </p>
+    <div id="esperandoEstado" style="margin-top:1.25rem; font-size:.78rem; color:var(--mm-text-muted);">
+      <span class="spinner-border spinner-border-sm me-1" style="width:.7rem;height:.7rem;border-width:.1em;"></span>
+      Verificando disponibilidad…
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+  const MESA_ID = {{ mesa.id }};
+  const URL = `/bienvenida/?mesa=${MESA_ID}`;
+  // Consulta el estado de la mesa cada 5 segundos.
+  // Cuando el servidor ya no devuelve step=mesa_cerrando, recarga la página.
+  async function verificar() {
+    try {
+      const res = await fetch(URL, { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+      const html = await res.text();
+      // Si la respuesta ya no contiene la marca de "cerrando", la mesa está lista.
+      if (!html.includes('mesa_cerrando') && !html.includes('proceso de cierre')) {
+        window.location.href = URL;
+      }
+    } catch(e) { /* ignorar errores de red, reintentar en el siguiente tick */ }
+  }
+  setInterval(verificar, 5000);
+})();
+</script>
+
+{# ── Caso: primer cliente que escanea la mesa → sesión creada, PIN mostrado ── #}
+{% elif step == 'pin_generado' %}
+<!-- ── Pantalla: PIN generado (primer cliente) ── -->
+<div class="welcome-hero" style="padding:2.5rem 1.5rem 2rem;">
+  <i class="bi bi-cup-hot-fill text-white" style="font-size:3rem; margin-bottom:.5rem; display:block;"></i>
+  <h2 class="fw-bold text-white mb-0" style="font-family:var(--font-display); font-size:1.75rem;">Mochi Matcha</h2>
+</div>
+
+<div class="welcome-card mx-3" style="margin-top:-1.5rem;">
+  <div class="text-center mb-3">
+    <span class="mesa-badge"><i class="bi bi-geo-alt-fill"></i> Mesa {{ mesa.numero_mesa }}{% if mesa.ubicacion %} · {{ mesa.ubicacion }}{% endif %}</span>
+  </div>
+
+  <div class="text-center mb-3">
+    <i class="bi bi-check-circle-fill" style="font-size:1.5rem; color:var(--mm-green); display:block; margin-bottom:.25rem;"></i>
+    <h5 class="fw-bold mb-1">¡Hola, {{ alias }}!</h5>
+    <p style="font-size:.875rem; color:var(--mm-text-muted);">Tu sesión fue creada. Guarda este PIN para compartirlo con tus acompañantes.</p>
+  </div>
+
+  {# Visualización del PIN de 4 dígitos en celdas individuales #}
+  <div class="pin-display mb-1">
+    {% for d in pin %}
+    <div class="pin-digit">{{ d }}</div>
+    {% endfor %}
+  </div>
+  <p class="text-center mb-4" style="font-size:.75rem; color:var(--mm-text-muted);">PIN de la mesa · compártelo para que otros puedan unirse</p>
+
+  <a href="{% url 'cliente:menu' %}" class="btn btn-primary w-100 py-3" style="font-size:1rem;">
+    <i class="bi bi-grid-fill me-2"></i>Ver el menú
+  </a>
+</div>
+
+{# ── Caso: ID de mesa no existe en la base de datos ── #}
+{% elif not mesa %}
+<!-- Error de mesa -->
+<div class="welcome-hero" style="min-height:60vh; display:flex; flex-direction:column; align-items:center; justify-content:center;">
+  <p class="text-white opacity-75">Mesa no encontrada</p>
+</div>
+
+{# ── Caso A/B: Mesa libre (primera vez) o el cliente eligió "Soy nuevo" ── #}
+{% elif mesa.estado == 'libre' or step == 'nuevo' %}
+<!-- ── Caso A/B: Mesa libre o "Soy nuevo" ── -->
+<div class="welcome-hero" style="padding:2.5rem 1.5rem 2rem;">
+  <i class="bi bi-cup-hot-fill text-white" style="font-size:3rem; margin-bottom:.5rem; display:block;"></i>
+  <h2 class="fw-bold text-white mb-0" style="font-family:var(--font-display); font-size:1.75rem;">Mochi Matcha</h2>
+  <p class="text-white opacity-75 mt-1" style="font-size:.9rem;">Bienvenido a tu mesa. ¡Ordena a tu ritmo!</p>
+</div>
+
+<div class="welcome-card mx-3" style="margin-top:-1.5rem;">
+  <div class="text-center mb-3">
+    <span class="mesa-badge"><i class="bi bi-geo-alt-fill"></i> Mesa {{ mesa.numero_mesa }}{% if mesa.ubicacion %} · {{ mesa.ubicacion }}{% endif %}</span>
+  </div>
+
+  {# Título y link "Volver" difieren según si viene del flujo "Soy nuevo" #}
+  {% if step == 'nuevo' %}
+  <a href="?mesa={{ mesa.id }}" class="d-flex align-items-center gap-1 mb-3 text-decoration-none" style="font-size:.85rem; color:var(--mm-text-muted);">
+    <i class="bi bi-chevron-left"></i> Volver
+  </a>
+  <h5 class="fw-bold mb-1">Unirse a la Mesa {{ mesa.numero_mesa }}</h5>
+  <p style="font-size:.85rem; color:var(--mm-text-muted); margin-bottom:1.25rem;">Elige un alias único para identificarte</p>
+  {% else %}
+  <h5 class="fw-bold mb-1">Crear sesión</h5>
+  <p style="font-size:.85rem; color:var(--mm-text-muted); margin-bottom:1.25rem;">Elige un alias para identificarte en tu mesa.</p>
+  {% endif %}
+
+  {# Formulario de alias: data-upper convierte a mayúsculas; modalidad=qr para tracking #}
+  <form method="post" action="{% url 'cliente:crear_sesion' mesa.id %}">
+    {% csrf_token %}
+    <input type="hidden" name="modalidad" value="qr">
+    <div class="mb-3">
+      <label class="form-label fw-semibold" style="font-size:.875rem;">Tu alias <span class="text-danger">*</span></label>
+      <input type="text" name="alias" maxlength="50" required data-upper
+             class="form-control form-control-lg rounded-3"
+             placeholder="ej. Carlos, Ale, El hambriento…"
+             style="border-color:var(--mm-border); font-size:.95rem;"
+             autocomplete="off" autocorrect="off" autocapitalize="words">
+      {% if error %}<div class="text-danger mt-1" style="font-size:.8rem;"><i class="bi bi-exclamation-circle me-1"></i>{{ error }}</div>{% endif %}
+    </div>
+    {# El texto del botón cambia según si el cliente se une a una sesión ya existente #}
+    <button type="submit" class="btn btn-primary w-100 py-3" style="font-size:1rem;">
+      <i class="bi bi-arrow-right-circle me-2"></i>{% if step == 'nuevo' %}Unirse a la mesa{% else %}Entrar al menú{% endif %}
+    </button>
+  </form>
+</div>
+
+{# ── Caso C: Mesa ya ocupada y el cliente no ha elegido qué hacer ── #}
+{% elif mesa.estado == 'ocupada' and not step %}
+<!-- ── Caso C: Mesa ocupada — elegir opción ── -->
+<div class="welcome-hero" style="padding:2.5rem 1.5rem 2rem;">
+  <i class="bi bi-cup-hot-fill text-white" style="font-size:3rem; margin-bottom:.5rem; display:block;"></i>
+  <h2 class="fw-bold text-white mb-0" style="font-family:var(--font-display); font-size:1.75rem;">Mochi Matcha</h2>
+</div>
+
+<div class="welcome-card mx-3" style="margin-top:-1.5rem;">
+  <div class="text-center mb-3">
+    <span class="mesa-badge"><i class="bi bi-geo-alt-fill"></i> Mesa {{ mesa.numero_mesa }}</span>
+  </div>
+
+  <h5 class="fw-bold mb-1 text-center">Mesa en uso</h5>
+  <p class="text-center mb-4" style="font-size:.875rem; color:var(--mm-text-muted);">Hay {{ sesiones_activas }} persona(s) en esta mesa. ¿Cómo quieres continuar?</p>
+
+  {# Dos opciones de acceso: crear sesión nueva o recuperar la existente #}
+  <div class="row g-3 mb-3">
+    <div class="col-6">
+      <a href="?mesa={{ mesa.id }}&step=nuevo" class="option-card d-block text-decoration-none">
+        <i class="bi bi-person-plus-fill"></i>
+        <div class="fw-bold mt-2" style="font-size:.9rem;">Soy nuevo</div>
+        <div style="font-size:.75rem; color:var(--mm-text-muted); margin-top:.25rem;">Crea tu sesión</div>
+      </a>
+    </div>
+    <div class="col-6">
+      <a href="?mesa={{ mesa.id }}&step=recuperar" class="option-card d-block text-decoration-none">
+        <i class="bi bi-key-fill"></i>
+        <div class="fw-bold mt-2" style="font-size:.9rem;">Ya tengo cuenta</div>
+        <div style="font-size:.75rem; color:var(--mm-text-muted); margin-top:.25rem;">Recuperar sesión</div>
+      </a>
+    </div>
+  </div>
+</div>
+
+{# ── Caso D: El cliente ya tiene sesión y necesita recuperarla con alias + PIN ── #}
+{% elif step == 'recuperar' %}
+<!-- ── Caso D: Recuperar sesión con alias + PIN ── -->
+<div class="welcome-hero" style="padding:2.5rem 1.5rem 2rem;">
+  <i class="bi bi-cup-hot-fill text-white" style="font-size:3rem; margin-bottom:.5rem; display:block;"></i>
+  <h2 class="fw-bold text-white mb-0" style="font-family:var(--font-display); font-size:1.75rem;">Mochi Matcha</h2>
+</div>
+
+<div class="welcome-card mx-3" style="margin-top:-1.5rem;">
+  <div class="text-center mb-3">
+    <span class="mesa-badge"><i class="bi bi-geo-alt-fill"></i> Mesa {{ mesa.numero_mesa }}</span>
+  </div>
+
+  <a href="?mesa={{ mesa.id }}" class="d-flex align-items-center gap-1 mb-3 text-decoration-none" style="font-size:.85rem; color:var(--mm-text-muted);">
+    <i class="bi bi-chevron-left"></i> Volver
+  </a>
+  <h5 class="fw-bold mb-1">Recuperar sesión</h5>
+  <p style="font-size:.85rem; color:var(--mm-text-muted); margin-bottom:1.25rem;">Ingresa tu alias y el PIN de la mesa.</p>
+
+  {# Formulario de recuperación: alias (con valor previo si hubo error) + PIN numérico #}
+  <form method="post" action="{% url 'cliente:recuperar_sesion' mesa.id %}">
+    {% csrf_token %}
+    <div class="mb-3">
+      <label class="form-label fw-semibold" style="font-size:.875rem;">Tu alias</label>
+      <input type="text" name="alias" maxlength="50" required data-upper
+             class="form-control rounded-3"
+             value="{{ alias_previo|default:'' }}"
+             placeholder="El alias que elegiste"
+             style="border-color:var(--mm-border);" autocomplete="off">
+    </div>
+    {# Campo PIN: 4 dígitos, teclado numérico en móvil, espaciado monospace para legibilidad #}
+    <div class="mb-4">
+      <label class="form-label fw-semibold" style="font-size:.875rem;">PIN de la mesa</label>
+      <input type="text" name="pin" maxlength="4" minlength="4" pattern="[0-9]{4}" required
+             class="form-control rounded-3 text-center"
+             placeholder="• • • •"
+             inputmode="numeric"
+             style="border-color:var(--mm-border); font-size:1.5rem; letter-spacing:.5em; font-family:var(--font-mono);">
+    </div>
+    {% if error %}
+    <div class="alert alert-danger py-2 px-3 rounded-3 mb-3" style="font-size:.85rem;">
+      <i class="bi bi-exclamation-triangle me-1"></i>{{ error }}
+    </div>
+    {% endif %}
+    <button type="submit" class="btn btn-primary w-100 py-3" style="font-size:1rem;">
+      <i class="bi bi-arrow-right-circle me-2"></i>Recuperar sesión
+    </button>
+  </form>
+</div>
+
+{% endif %}
+
+{% endblock %}

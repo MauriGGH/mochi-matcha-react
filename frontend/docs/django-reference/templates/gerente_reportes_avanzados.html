@@ -1,0 +1,1681 @@
+{% extends "base/staff_base.html" %}
+{% load static %}
+{% block title %}Reportes — {{ tipo }}{% endblock %}
+{% block page_title %}Reportes{% endblock %}
+
+{% block sidebar_nav %}
+<a href="{% url 'gerente:floor_plan' %}"><i class="bi bi-grid-fill"></i> Floor Plan</a>
+<div class="nav-section-label">Gestión</div>
+<a href="{% url 'gerente:productos' %}"><i class="bi bi-basket-fill"></i> Menú</a>
+<div class="nav-section-label">Reportes</div>
+<a href="{% url 'gerente:reportes_avanzados' %}" class="active"><i class="bi bi-bar-chart-fill"></i> Reportes</a>
+<a href="{% url 'gerente:auditoria' %}"><i class="bi bi-shield-check"></i> Auditoría</a>
+<div class="nav-section-label">Admin</div>
+<a href="{% url 'gerente:empleados' %}"><i class="bi bi-people-fill"></i> Empleados</a>
+<a href="{% url 'gerente:configuracion' %}"><i class="bi bi-gear-fill"></i> Configuración</a>
+{% endblock %}
+
+{% block extra_head %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+/* ══════════════════════════════════════════════════════════════
+   VARIABLES — se definen aquí si mochi.css no las trae
+══════════════════════════════════════════════════════════════ */
+:root {
+  --mm-green:       #3D6B4F;
+  --mm-green-dark:  #2D5A3D;
+  --mm-green-mid:   #5A8F6B;
+  --mm-green-pale:  #E8F4EA;
+  --mm-gold:        #C9933A;
+  --mm-gold-pale:   #FDF3E0;
+  --mm-blue:        #1A6A8A;
+  --mm-cream:       #F8F5EF;
+  --mm-cream-dark:  #EDE8DE;
+  --mm-white:       #FFFFFF;
+  --mm-border:      #E2DDD5;
+  --mm-text:        #1C2A1E;
+  --mm-text-muted:  #7A8C7E;
+  --mm-danger:      #C0392B;
+  --mm-success:     #2E7D32;
+  --radius-xs:      4px;
+  --radius-sm:      8px;
+  --radius-md:      12px;
+  --radius-lg:      18px;
+  --radius-pill:    999px;
+  --font-mono:      'JetBrains Mono', monospace;
+  --shadow-sm:      0 1px 4px rgba(0,0,0,.06);
+  --shadow-md:      0 4px 16px rgba(0,0,0,.08);
+  --shadow-lg:      0 8px 32px rgba(0,0,0,.12);
+}
+
+/* ══════════════════════════════════════════════════════════════
+   TOOLBAR
+══════════════════════════════════════════════════════════════ */
+.rep-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: .75rem;
+  padding: .9rem 1.25rem;
+  margin-bottom: 1.25rem;
+  background: var(--mm-white);
+  border: 1px solid var(--mm-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+  position: relative;
+  overflow: hidden;
+}
+.rep-toolbar::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--mm-green) 0%, var(--mm-green-mid) 50%, var(--mm-gold) 100%);
+}
+.rep-toolbar-label {
+  font-size: .65rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .1em;
+  color: var(--mm-text-muted);
+  margin-right: .3rem;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   NAVEGACIÓN — CATEGORÍAS
+══════════════════════════════════════════════════════════════ */
+.rep-cats {
+  display: flex;
+  gap: .3rem;
+  padding: .35rem;
+  background: var(--mm-white);
+  border: 1px solid var(--mm-border);
+  border-radius: var(--radius-md);
+  margin-bottom: .65rem;
+  overflow-x: auto;
+  box-shadow: var(--shadow-sm);
+  scrollbar-width: none;
+}
+.rep-cats::-webkit-scrollbar { display: none; }
+
+.rep-cat {
+  display: inline-flex;
+  align-items: center;
+  gap: .5rem;
+  padding: .55rem 1.1rem;
+  border-radius: var(--radius-sm);
+  font-size: .82rem;
+  font-weight: 600;
+  text-decoration: none;
+  color: var(--mm-text-muted);
+  white-space: nowrap;
+  transition: all .2s ease;
+  border: 1px solid transparent;
+}
+.rep-cat:hover {
+  background: var(--mm-cream);
+  color: var(--mm-text);
+  border-color: var(--mm-border);
+}
+.rep-cat.active {
+  background: linear-gradient(135deg, var(--mm-green-dark), var(--mm-green));
+  color: #fff;
+  border-color: var(--mm-green-dark);
+  box-shadow: 0 3px 10px rgba(61,107,79,.3);
+}
+
+/* ══════════════════════════════════════════════════════════════
+   NAVEGACIÓN — SUB-ITEMS
+══════════════════════════════════════════════════════════════ */
+.rep-subnav {
+  display: flex;
+  gap: .4rem;
+  flex-wrap: wrap;
+  align-items: center;
+  padding: .65rem .9rem;
+  margin-bottom: 1.5rem;
+  background: linear-gradient(135deg, var(--mm-cream), var(--mm-white));
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--mm-border);
+}
+.rep-sub {
+  display: inline-flex;
+  align-items: center;
+  gap: .3rem;
+  padding: .35rem .8rem;
+  border-radius: var(--radius-pill);
+  font-size: .76rem;
+  font-weight: 600;
+  text-decoration: none;
+  color: var(--mm-text-muted);
+  background: var(--mm-white);
+  border: 1.5px solid var(--mm-border);
+  transition: all .2s ease;
+}
+.rep-sub:hover {
+  border-color: var(--mm-green);
+  color: var(--mm-green);
+  box-shadow: 0 2px 6px rgba(61,107,79,.15);
+}
+.rep-sub.active {
+  background: var(--mm-green);
+  border-color: var(--mm-green-dark);
+  color: #fff;
+  box-shadow: 0 2px 10px rgba(61,107,79,.3);
+}
+
+/* ══════════════════════════════════════════════════════════════
+   KPI GRID
+══════════════════════════════════════════════════════════════ */
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(155px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.kpi {
+  position: relative;
+  background: var(--mm-white);
+  border: 1px solid var(--mm-border);
+  border-radius: var(--radius-md);
+  padding: 1.25rem 1.25rem 1.1rem;
+  overflow: hidden;
+  transition: transform .2s ease, box-shadow .2s ease;
+  animation: fadeUp .35s ease both;
+}
+.kpi:nth-child(1){animation-delay:.04s}
+.kpi:nth-child(2){animation-delay:.08s}
+.kpi:nth-child(3){animation-delay:.12s}
+.kpi:nth-child(4){animation-delay:.16s}
+.kpi:nth-child(5){animation-delay:.2s}
+.kpi:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); }
+
+.kpi::after {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--mm-green), var(--mm-green-mid));
+}
+.kpi.accent::after  { background: linear-gradient(90deg, var(--mm-gold), #E8AA50); }
+.kpi.kpi-blue::after{ background: linear-gradient(90deg, var(--mm-blue), #2A8AAA); }
+.kpi.kpi-danger::after{ background: linear-gradient(90deg, var(--mm-danger), #E05540); }
+
+.kpi-icon {
+  width: 38px; height: 38px;
+  border-radius: var(--radius-sm);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1.05rem;
+  margin-bottom: .8rem;
+  background: var(--mm-green-pale);
+  color: var(--mm-green);
+}
+.kpi.accent   .kpi-icon { background: var(--mm-gold-pale); color: var(--mm-gold); }
+.kpi.kpi-blue .kpi-icon { background: rgba(26,106,138,.1); color: var(--mm-blue); }
+.kpi.kpi-danger .kpi-icon { background: rgba(192,57,43,.1); color: var(--mm-danger); }
+
+.kpi-val {
+  font-size: 1.8rem;
+  font-weight: 800;
+  color: var(--mm-green);
+  font-family: var(--font-mono);
+  line-height: 1.1;
+  letter-spacing: -.03em;
+}
+.kpi.accent   .kpi-val { color: var(--mm-gold); }
+.kpi.kpi-blue .kpi-val { color: var(--mm-blue); }
+.kpi.kpi-danger .kpi-val { color: var(--mm-danger); }
+
+.kpi-lbl {
+  font-size: .67rem;
+  color: var(--mm-text-muted);
+  margin-top: .3rem;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  font-weight: 700;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   CHART WRAPPER — premium glass card
+══════════════════════════════════════════════════════════════ */
+.chart-wrap {
+  background: var(--mm-white);
+  border: 1px solid var(--mm-border);
+  border-radius: var(--radius-lg);
+  padding: 0;
+  margin-bottom: 1.25rem;
+  position: relative;
+  box-shadow: 0 6px 24px rgba(0,0,0,.07), 0 1px 4px rgba(0,0,0,.04);
+  overflow: hidden;
+  transition: box-shadow .2s ease, transform .2s ease;
+}
+.chart-wrap:hover { box-shadow: 0 10px 36px rgba(0,0,0,.1); }
+
+/* barra accent superior */
+.chart-wrap::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--mm-green) 0%, var(--mm-green-mid) 45%, var(--mm-blue) 100%);
+  z-index: 1;
+}
+/* área header del chart */
+.chart-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.35rem .75rem;
+  background: linear-gradient(135deg, var(--mm-cream) 0%, var(--mm-white) 100%);
+  border-bottom: 1px solid var(--mm-border);
+}
+.chart-title {
+  font-size: .7rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .12em;
+  color: var(--mm-text);
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+}
+.chart-title i { color: var(--mm-green); font-size: .9rem; }
+.chart-body { padding: 1.25rem 1.35rem 1.35rem; }
+.chart-actions { display: flex; gap: .3rem; }
+.btn-dl {
+  padding: .28rem .65rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--mm-border);
+  background: var(--mm-white);
+  color: var(--mm-text-muted);
+  font-size: .7rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all .15s;
+  display: flex; align-items: center; gap: .3rem;
+}
+.btn-dl:hover {
+  background: var(--mm-green-pale);
+  border-color: var(--mm-green);
+  color: var(--mm-green);
+}
+
+/* ══════════════════════════════════════════════════════════════
+   DATA TABLES — premium
+══════════════════════════════════════════════════════════════ */
+.data-table {
+  width: 100%;
+  background: var(--mm-white);
+  border: 1px solid var(--mm-border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  margin-bottom: 1.25rem;
+  box-shadow: 0 6px 24px rgba(0,0,0,.07), 0 1px 4px rgba(0,0,0,.04);
+}
+.data-table-header {
+  padding: .85rem 1.25rem;
+  font-size: .68rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .1em;
+  color: var(--mm-text);
+  border-bottom: 1px solid var(--mm-border);
+  background: linear-gradient(135deg, var(--mm-cream) 0%, var(--mm-white) 100%);
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  position: relative;
+  overflow: hidden;
+}
+.data-table-header::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0; height: 3px;
+  background: linear-gradient(90deg, var(--mm-green), var(--mm-green-mid), var(--mm-gold));
+}
+.data-table table { width: 100%; border-collapse: collapse; font-size: .82rem; }
+.data-table thead th {
+  background: linear-gradient(135deg, var(--mm-green-dark) 0%, var(--mm-green) 100%);
+  color: rgba(255,255,255,.95);
+  padding: .75rem 1.25rem;
+  font-size: .62rem;
+  text-transform: uppercase;
+  letter-spacing: .1em;
+  font-weight: 800;
+}
+.data-table thead th:first-child { border-radius: 0; }
+.data-table tbody tr { border-bottom: 1px solid var(--mm-border); transition: background .12s, transform .1s; }
+.data-table tbody tr:last-child { border-bottom: none; }
+.data-table tbody tr:nth-child(even) { background: rgba(232,244,234,.35); }
+.data-table tbody tr:hover { background: var(--mm-green-pale); }
+.data-table tbody td { padding: .75rem 1.25rem; }
+.tr { text-align: right; }
+
+/* ── Badges ── */
+.badge-pill {
+  display: inline-flex; align-items: center;
+  border-radius: var(--radius-pill);
+  padding: .2rem .65rem;
+  font-size: .67rem; font-weight: 700;
+  letter-spacing: .03em;
+}
+.badge-green { background: var(--mm-green-pale); color: var(--mm-green); border: 1px solid rgba(61,107,79,.12); }
+.badge-gold  { background: var(--mm-gold-pale);  color: var(--mm-gold);  border: 1px solid rgba(201,147,58,.12); }
+
+/* ── Rank medals ── */
+.rank-num {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 24px; height: 24px; border-radius: 50%;
+  font-size: .7rem; font-weight: 800;
+}
+.rank-1 { background: linear-gradient(135deg,#FFD700,#FFA500); color:#333; box-shadow:0 2px 6px rgba(255,165,0,.4); }
+.rank-2 { background: linear-gradient(135deg,#D0D0D0,#A8A8A8); color:#333; }
+.rank-3 { background: linear-gradient(135deg,#CD7F32,#A0522D); color:#fff; }
+.rank-n { background: var(--mm-cream-dark); color: var(--mm-text-muted); }
+
+/* ══════════════════════════════════════════════════════════════
+   CORTE DEL DÍA — header especial con glassmorphism
+══════════════════════════════════════════════════════════════ */
+.corte-header {
+  background: linear-gradient(135deg, var(--mm-green-dark) 0%, var(--mm-green) 55%, #5A8F6B 100%);
+  color: #fff;
+  border-radius: var(--radius-lg);
+  padding: 2rem;
+  margin-bottom: 1.5rem;
+  position: relative;
+  overflow: hidden;
+  box-shadow: 0 12px 40px rgba(45,90,61,.35), 0 4px 12px rgba(45,90,61,.2);
+  border: 1px solid rgba(255,255,255,.12);
+}
+/* orbe superior derecho */
+.corte-header::before {
+  content: '';
+  position: absolute;
+  top: -60px; right: -60px;
+  width: 240px; height: 240px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255,255,255,.12) 0%, rgba(255,255,255,0) 70%);
+  pointer-events: none;
+}
+/* orbe inferior derecho */
+.corte-header::after {
+  content: '';
+  position: absolute;
+  bottom: -90px; right: 50px;
+  width: 320px; height: 320px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(201,147,58,.18) 0%, rgba(201,147,58,0) 65%);
+  pointer-events: none;
+}
+/* panel glassmorphism para el título */
+.corte-title-glass {
+  position: relative;
+  z-index: 2;
+  display: inline-block;
+  background: rgba(255,255,255,.1);
+  border: 1px solid rgba(255,255,255,.22);
+  border-radius: var(--radius-sm);
+  padding: .7rem 1.1rem;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.18), 0 4px 16px rgba(0,0,0,.08);
+}
+/* línea de acento dorado debajo del título */
+.corte-title-glass::after {
+  content: '';
+  position: absolute;
+  bottom: 0; left: 1.1rem; right: 1.1rem;
+  height: 2px;
+  background: linear-gradient(90deg, rgba(201,147,58,.7), rgba(201,147,58,0));
+  border-radius: 2px;
+}
+/* separador glass entre título y grid */
+.corte-divider {
+  position: relative;
+  z-index: 2;
+  height: 1px;
+  margin: 1.25rem 0;
+  background: linear-gradient(90deg, rgba(255,255,255,.25) 0%, rgba(255,255,255,.05) 100%);
+}
+.corte-titulo { font-size: 1.45rem; font-weight: 800; letter-spacing: -.01em; }
+.corte-label  { font-size: .68rem; font-weight: 700; text-transform: uppercase; letter-spacing: .14em; opacity: .65; margin-bottom: .3rem; }
+.corte-grid   { display: grid; grid-template-columns: repeat(auto-fit,minmax(118px,1fr)); gap: .8rem; }
+.corte-kpi {
+  position: relative;
+  background: rgba(255,255,255,.1);
+  border: 1px solid rgba(255,255,255,.22);
+  border-radius: var(--radius-sm);
+  padding: 1rem 1.1rem;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.2), 0 4px 12px rgba(0,0,0,.08);
+  transition: background .22s ease, transform .22s ease, box-shadow .22s ease;
+  overflow: hidden;
+}
+/* shimmer sutil en la parte superior de cada kpi */
+.corte-kpi::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,.45), transparent);
+  pointer-events: none;
+}
+.corte-kpi:hover {
+  background: rgba(255,255,255,.18);
+  transform: translateY(-2px);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.28), 0 8px 20px rgba(0,0,0,.12);
+}
+.corte-kpi .val {
+  font-size: 1.45rem; font-weight: 800;
+  font-family: var(--font-mono); letter-spacing: -.03em;
+  text-shadow: 0 1px 4px rgba(0,0,0,.15);
+}
+.corte-kpi .lbl {
+  font-size: .62rem; opacity: .68; margin-top: .2rem;
+  text-transform: uppercase; letter-spacing: .09em; font-weight: 700;
+}
+/* orbe lateral izquierdo adicional */
+.corte-orbe-left {
+  position: absolute;
+  bottom: -40px; left: -30px;
+  width: 160px; height: 160px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255,255,255,.07) 0%, rgba(255,255,255,0) 70%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   EXPORT MODAL
+══════════════════════════════════════════════════════════════ */
+.exp-cat-hdr {
+  grid-column: 1 / -1;
+  font-size: .67rem; font-weight: 800; color: var(--mm-green);
+  text-transform: uppercase; letter-spacing: .08em;
+  padding: .5rem 0 .2rem; margin-top: .3rem;
+  border-bottom: 2px solid var(--mm-green-pale);
+  display: flex; align-items: center; gap: .35rem;
+}
+.exp-chk {
+  display: flex; align-items: center; gap: .45rem;
+  cursor: pointer; font-size: .8rem;
+  padding: .35rem .6rem; border-radius: var(--radius-sm);
+  transition: background .1s; border: 1px solid transparent;
+}
+.exp-chk:hover { background: var(--mm-cream); border-color: var(--mm-border); }
+.exp-chk input[type="checkbox"] { accent-color: var(--mm-green); width: 14px; height: 14px; flex-shrink: 0; }
+
+/* ══════════════════════════════════════════════════════════════
+   SECTION HERO — banner glassmorphism para cada sección
+══════════════════════════════════════════════════════════════ */
+.section-hero {
+  border-radius: var(--radius-lg);
+  padding: 1.5rem 2rem;
+  margin-bottom: 1.5rem;
+  position: relative;
+  overflow: hidden;
+  color: #fff;
+  border: 1px solid rgba(255,255,255,.12);
+  animation: fadeUp .35s ease both;
+}
+.section-hero.green  {
+  background: linear-gradient(135deg, var(--mm-green-dark) 0%, var(--mm-green) 55%, #5A8F6B 100%);
+  box-shadow: 0 12px 40px rgba(45,90,61,.35), 0 4px 12px rgba(45,90,61,.15);
+}
+.section-hero.blue   {
+  background: linear-gradient(135deg, #0F3A5A 0%, var(--mm-blue) 55%, #2A8AAA 100%);
+  box-shadow: 0 12px 40px rgba(15,58,90,.35), 0 4px 12px rgba(15,58,90,.15);
+}
+.section-hero.gold   {
+  background: linear-gradient(135deg, #7A4E10 0%, var(--mm-gold) 55%, #E8AA50 100%);
+  box-shadow: 0 12px 40px rgba(122,78,16,.35), 0 4px 12px rgba(122,78,16,.15);
+}
+.section-hero.teal   {
+  background: linear-gradient(135deg, #0D4A4A 0%, #1A7A6A 55%, #2A9A8A 100%);
+  box-shadow: 0 12px 40px rgba(13,74,74,.35), 0 4px 12px rgba(13,74,74,.15);
+}
+.section-hero.danger {
+  background: linear-gradient(135deg, #7B1A1A 0%, var(--mm-danger) 55%, #E05540 100%);
+  box-shadow: 0 12px 40px rgba(123,26,26,.35), 0 4px 12px rgba(123,26,26,.15);
+}
+/* orbe superior derecho */
+.section-hero::before {
+  content: '';
+  position: absolute; top: -60px; right: -60px;
+  width: 220px; height: 220px; border-radius: 50%;
+  background: radial-gradient(circle, rgba(255,255,255,.12) 0%, transparent 70%);
+  pointer-events: none;
+}
+/* orbe inferior */
+.section-hero::after {
+  content: '';
+  position: absolute; bottom: -70px; right: 50px;
+  width: 280px; height: 280px; border-radius: 50%;
+  background: radial-gradient(circle, rgba(255,255,255,.06) 0%, transparent 65%);
+  pointer-events: none;
+}
+/* orbe izquierdo extra */
+.section-hero-orbe {
+  position: absolute; bottom: -40px; left: -30px;
+  width: 160px; height: 160px; border-radius: 50%;
+  background: radial-gradient(circle, rgba(255,255,255,.07) 0%, transparent 70%);
+  pointer-events: none; z-index: 0;
+}
+/* panel glass para el título dentro del hero */
+.hero-glass {
+  display: inline-block;
+  position: relative; z-index: 2;
+  background: rgba(255,255,255,.1);
+  border: 1px solid rgba(255,255,255,.22);
+  border-radius: var(--radius-sm);
+  padding: .65rem 1.1rem;
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.18), 0 4px 16px rgba(0,0,0,.08);
+}
+.hero-label {
+  font-size: .68rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .14em; opacity: .65; margin-bottom: .3rem;
+}
+.hero-title { font-size: 1.2rem; font-weight: 800; letter-spacing: -.01em; }
+.hero-divider {
+  position: relative; z-index: 2;
+  height: 1px; margin: 1rem 0;
+  background: linear-gradient(90deg, rgba(255,255,255,.3) 0%, rgba(255,255,255,.04) 100%);
+}
+/* fila de KPIs dentro del hero */
+.hero-kpis {
+  position: relative; z-index: 2;
+  display: flex; gap: .75rem; flex-wrap: wrap;
+}
+.hero-kpi {
+  flex: 1; min-width: 110px;
+  position: relative;
+  background: rgba(255,255,255,.1);
+  border: 1px solid rgba(255,255,255,.22);
+  border-radius: var(--radius-sm);
+  padding: .75rem 1rem;
+  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.2);
+  overflow: hidden;
+  transition: background .2s ease, transform .2s ease;
+}
+.hero-kpi::before {
+  content: ''; display: block; height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,.4), transparent);
+  margin-bottom: .5rem;
+}
+.hero-kpi:hover { background: rgba(255,255,255,.18); transform: translateY(-2px); }
+.hero-kpi .val { font-size: 1.25rem; font-weight: 800; font-family: var(--font-mono); letter-spacing: -.03em; text-shadow: 0 1px 4px rgba(0,0,0,.15); }
+.hero-kpi .lbl { font-size: .62rem; opacity: .7; margin-top: .15rem; text-transform: uppercase; letter-spacing: .08em; font-weight: 700; }
+
+/* ══════════════════════════════════════════════════════════════
+   ANIMACIONES
+══════════════════════════════════════════════════════════════ */
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.chart-wrap  { animation: fadeUp .4s ease .1s both; }
+.data-table  { animation: fadeUp .4s ease .15s both; }
+.corte-header{ animation: fadeUp .35s ease both; }
+.section-hero{ animation: fadeUp .35s ease both; }
+</style>
+
+<script>
+/* ── Chart.js defaults globales ─────────────────────────────── */
+document.addEventListener('DOMContentLoaded', () => {
+  if (typeof Chart === 'undefined') return;
+  Chart.defaults.font.family = "'DM Sans', 'Inter', sans-serif";
+  Chart.defaults.font.size   = 11;
+  Chart.defaults.color       = '#7A8C7E';
+  Chart.defaults.plugins.tooltip.backgroundColor = 'rgba(28,42,30,.88)';
+  Chart.defaults.plugins.tooltip.titleColor      = '#fff';
+  Chart.defaults.plugins.tooltip.bodyColor       = 'rgba(255,255,255,.82)';
+  Chart.defaults.plugins.tooltip.padding         = 10;
+  Chart.defaults.plugins.tooltip.cornerRadius    = 8;
+  Chart.defaults.plugins.tooltip.displayColors   = true;
+  Chart.defaults.plugins.legend.labels.usePointStyle = true;
+  Chart.defaults.plugins.legend.labels.padding   = 16;
+  Chart.defaults.animation.duration              = 700;
+  Chart.defaults.animation.easing               = 'easeOutQuart';
+  Chart.defaults.elements.bar.borderRadius       = 7;
+  Chart.defaults.elements.bar.borderSkipped      = false;
+  Chart.defaults.elements.line.tension           = 0.4;
+  Chart.defaults.elements.point.radius           = 4;
+  Chart.defaults.elements.point.hoverRadius      = 7;
+  Chart.defaults.scale.grid.color               = 'rgba(226,221,213,.5)';
+  Chart.defaults.scale.grid.drawBorder           = false;
+});
+</script>
+{% endblock %}
+
+{% block content %}
+
+<!-- ── Toolbar: fechas + exportar ── -->
+<div class="rep-toolbar">
+  <div style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;">
+    <span class="rep-toolbar-label"><i class="bi bi-calendar3 me-1"></i>Período</span>
+    <form method="get" id="fFechas" style="display:flex;align-items:center;gap:.4rem;flex-wrap:wrap;">
+      <input type="hidden" name="tipo" value="{{ tipo }}">
+      <input type="date" name="desde" value="{{ desde|date:'Y-m-d' }}" class="form-control form-control-sm"
+             style="width:135px;font-size:.8rem;border-color:var(--mm-border);border-radius:var(--radius-sm);"
+             onchange="document.getElementById('fFechas').submit()">
+      <span style="font-size:.75rem;color:var(--mm-text-muted);">–</span>
+      <input type="date" name="hasta" value="{{ hasta|date:'Y-m-d' }}" class="form-control form-control-sm"
+             style="width:135px;font-size:.8rem;border-color:var(--mm-border);border-radius:var(--radius-sm);"
+             onchange="document.getElementById('fFechas').submit()">
+      <button type="submit" class="btn btn-sm" style="background:var(--mm-cream-dark);font-size:.78rem;padding:.32rem .75rem;border-radius:var(--radius-sm);">
+        <i class="bi bi-funnel me-1"></i>Filtrar
+      </button>
+    </form>
+  </div>
+  <div style="display:flex;align-items:center;gap:.5rem;">
+    <span class="rep-toolbar-label"><i class="bi bi-download me-1"></i>Exportar</span>
+    <button type="button" class="btn btn-sm" style="background:var(--mm-green);color:#fff;font-size:.78rem;padding:.32rem .9rem;border-radius:var(--radius-sm);box-shadow:0 2px 8px rgba(61,107,79,.3);"
+            data-bs-toggle="modal" data-bs-target="#exportModal">
+      <i class="bi bi-sliders me-1"></i>Exportar…
+    </button>
+  </div>
+</div>
+
+<!-- ── Nav principal: categorías ── -->
+<div class="rep-cats">
+  <a href="?tipo=corte_dia&desde={{ hoy|date:'Y-m-d' }}&hasta={{ hoy|date:'Y-m-d' }}"
+     class="rep-cat {% if tipo == 'corte_dia' or tipo == 'corte_mesero' %}active{% endif %}">
+    <i class="bi bi-scissors"></i> Cortes
+  </a>
+  <a href="?tipo=ventas_dia&desde={{ desde|date:'Y-m-d' }}&hasta={{ hasta|date:'Y-m-d' }}"
+     class="rep-cat {% if tipo == 'ventas_dia' or tipo == 'ventas_semana' or tipo == 'ventas_mes' or tipo == 'ventas_metodo' %}active{% endif %}">
+    <i class="bi bi-graph-up-arrow"></i> Ventas
+  </a>
+  <a href="?tipo=top_productos&desde={{ desde|date:'Y-m-d' }}&hasta={{ hasta|date:'Y-m-d' }}"
+     class="rep-cat {% if tipo == 'top_productos' or tipo == 'menos_vendidos' or tipo == 'ventas_categoria' or tipo == 'descuentos_productos' %}active{% endif %}">
+    <i class="bi bi-bag-fill"></i> Productos
+  </a>
+  <a href="?tipo=comparativa_empleados&desde={{ desde|date:'Y-m-d' }}&hasta={{ hasta|date:'Y-m-d' }}"
+     class="rep-cat {% if tipo == 'comparativa_empleados' or tipo == 'tiempo_atencion' %}active{% endif %}">
+    <i class="bi bi-people-fill"></i> Equipo
+  </a>
+  <a href="?tipo=mesas_utilizadas&desde={{ desde|date:'Y-m-d' }}&hasta={{ hasta|date:'Y-m-d' }}"
+     class="rep-cat {% if tipo == 'mesas_utilizadas' or tipo == 'cancelaciones' %}active{% endif %}">
+    <i class="bi bi-table"></i> Operativo
+  </a>
+</div>
+
+<!-- ── Sub-nav ── -->
+<div class="rep-subnav">
+{% if tipo == "corte_dia" or tipo == "corte_mesero" %}
+  <a href="?tipo=corte_dia&desde={{ hoy|date:'Y-m-d' }}&hasta={{ hoy|date:'Y-m-d' }}"
+     class="rep-sub {% if tipo == 'corte_dia' %}active{% endif %}">
+    <i class="bi bi-file-text"></i> Corte del día
+  </a>
+  <a href="?tipo=corte_mesero&desde={{ desde|date:'Y-m-d' }}&hasta={{ hasta|date:'Y-m-d' }}"
+     class="rep-sub {% if tipo == 'corte_mesero' %}active{% endif %}">
+    <i class="bi bi-person-badge"></i> Por mesero
+  </a>
+{% elif tipo == "ventas_dia" or tipo == "ventas_semana" or tipo == "ventas_mes" or tipo == "ventas_metodo" %}
+  <a href="?tipo=ventas_dia&desde={{ desde|date:'Y-m-d' }}&hasta={{ hasta|date:'Y-m-d' }}"
+     class="rep-sub {% if tipo == 'ventas_dia' %}active{% endif %}">
+    <i class="bi bi-calendar-day"></i> Por día
+  </a>
+  <a href="?tipo=ventas_semana&desde={{ desde|date:'Y-m-d' }}&hasta={{ hasta|date:'Y-m-d' }}"
+     class="rep-sub {% if tipo == 'ventas_semana' %}active{% endif %}">
+    <i class="bi bi-calendar-week"></i> Por semana
+  </a>
+  <a href="?tipo=ventas_mes&desde={{ desde|date:'Y-m-d' }}&hasta={{ hasta|date:'Y-m-d' }}"
+     class="rep-sub {% if tipo == 'ventas_mes' %}active{% endif %}">
+    <i class="bi bi-calendar-month"></i> Por mes
+  </a>
+  <a href="?tipo=ventas_metodo&desde={{ desde|date:'Y-m-d' }}&hasta={{ hasta|date:'Y-m-d' }}"
+     class="rep-sub {% if tipo == 'ventas_metodo' %}active{% endif %}">
+    <i class="bi bi-credit-card"></i> Por método de pago
+  </a>
+{% elif tipo == "top_productos" or tipo == "menos_vendidos" or tipo == "ventas_categoria" or tipo == "descuentos_productos" %}
+  <a href="?tipo=top_productos&desde={{ desde|date:'Y-m-d' }}&hasta={{ hasta|date:'Y-m-d' }}"
+     class="rep-sub {% if tipo == 'top_productos' %}active{% endif %}">
+    <i class="bi bi-trophy"></i> Más vendidos
+  </a>
+  <a href="?tipo=menos_vendidos&desde={{ desde|date:'Y-m-d' }}&hasta={{ hasta|date:'Y-m-d' }}"
+     class="rep-sub {% if tipo == 'menos_vendidos' %}active{% endif %}">
+    <i class="bi bi-graph-down-arrow"></i> Menos vendidos
+  </a>
+  <a href="?tipo=ventas_categoria&desde={{ desde|date:'Y-m-d' }}&hasta={{ hasta|date:'Y-m-d' }}"
+     class="rep-sub {% if tipo == 'ventas_categoria' %}active{% endif %}">
+    <i class="bi bi-grid"></i> Por categoría
+  </a>
+  <a href="?tipo=descuentos_productos&desde={{ desde|date:'Y-m-d' }}&hasta={{ hasta|date:'Y-m-d' }}"
+     class="rep-sub {% if tipo == 'descuentos_productos' %}active{% endif %}">
+    <i class="bi bi-tag"></i> Promos aplicadas
+  </a>
+{% elif tipo == "comparativa_empleados" or tipo == "tiempo_atencion" %}
+  <a href="?tipo=comparativa_empleados&desde={{ desde|date:'Y-m-d' }}&hasta={{ hasta|date:'Y-m-d' }}"
+     class="rep-sub {% if tipo == 'comparativa_empleados' %}active{% endif %}">
+    <i class="bi bi-bar-chart-steps"></i> Comparativa
+  </a>
+  <a href="?tipo=tiempo_atencion&desde={{ desde|date:'Y-m-d' }}&hasta={{ hasta|date:'Y-m-d' }}"
+     class="rep-sub {% if tipo == 'tiempo_atencion' %}active{% endif %}">
+    <i class="bi bi-stopwatch"></i> Tiempo de atención
+  </a>
+{% elif tipo == "mesas_utilizadas" or tipo == "cancelaciones" %}
+  <a href="?tipo=mesas_utilizadas&desde={{ desde|date:'Y-m-d' }}&hasta={{ hasta|date:'Y-m-d' }}"
+     class="rep-sub {% if tipo == 'mesas_utilizadas' %}active{% endif %}">
+    <i class="bi bi-layout-three-columns"></i> Mesas utilizadas
+  </a>
+  <a href="?tipo=cancelaciones&desde={{ desde|date:'Y-m-d' }}&hasta={{ hasta|date:'Y-m-d' }}"
+     class="rep-sub {% if tipo == 'cancelaciones' %}active{% endif %}">
+    <i class="bi bi-x-circle"></i> Cancelaciones
+  </a>
+{% endif %}
+</div>
+
+
+<!-- ════════════════════════════════════════════════════════════
+     CORTE DEL DÍA
+════════════════════════════════════════════════════════════ -->
+{% if tipo == "corte_dia" %}
+
+<div class="corte-header">
+  <!-- orbe decorativo izquierdo -->
+  <div class="corte-orbe-left"></div>
+
+  <!-- título en panel glassmorphism -->
+  <div style="position:relative;z-index:2;">
+    <div class="corte-title-glass">
+      <div class="corte-label"><i class="bi bi-scissors me-1"></i>Corte del Día</div>
+      <div class="corte-titulo">{{ desde|date:"d \d\e F \d\e Y" }}</div>
+    </div>
+  </div>
+
+  <!-- separador glass -->
+  <div class="corte-divider"></div>
+
+  <!-- KPIs -->
+  <div class="corte-grid" style="position:relative;z-index:2;">
+    <div class="corte-kpi">
+      <div class="val">${{ kpi_total|floatformat:2 }}</div>
+      <div class="lbl"><i class="bi bi-cash-stack me-1"></i>Ventas totales</div>
+    </div>
+    <div class="corte-kpi">
+      <div class="val">{{ kpi_tickets }}</div>
+      <div class="lbl"><i class="bi bi-receipt me-1"></i>Pedidos</div>
+    </div>
+    <div class="corte-kpi">
+      <div class="val">${{ kpi_promedio|floatformat:2 }}</div>
+      <div class="lbl"><i class="bi bi-graph-up me-1"></i>Ticket promedio</div>
+    </div>
+    <div class="corte-kpi">
+      <div class="val">${{ kpi_propinas|floatformat:2 }}</div>
+      <div class="lbl"><i class="bi bi-hand-thumbs-up me-1"></i>Propinas</div>
+    </div>
+    <div class="corte-kpi">
+      <div class="val">{{ kpi_cancelados }}</div>
+      <div class="lbl"><i class="bi bi-x-circle me-1"></i>Cancelaciones</div>
+    </div>
+  </div>
+</div>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:1.25rem;margin-bottom:1.25rem;">
+  <div class="chart-wrap">
+    <div class="chart-head">
+      <div class="chart-title"><i class="bi bi-bar-chart-fill"></i> Ventas por hora</div>
+      <div class="chart-actions">
+        <button class="btn-dl" onclick="dlChart('chartHora','ventas_hora')"><i class="bi bi-download"></i> PNG</button>
+      </div>
+    </div>
+    <div class="chart-body"><canvas id="chartHora"></canvas></div>
+  </div>
+  <div class="chart-wrap">
+    <div class="chart-head">
+      <div class="chart-title"><i class="bi bi-pie-chart-fill"></i> Por método de pago</div>
+      <div class="chart-actions">
+        <button class="btn-dl" onclick="dlChart('chartMetodo','metodo_pago')"><i class="bi bi-download"></i> PNG</button>
+      </div>
+    </div>
+    <div class="chart-body"><canvas id="chartMetodo"></canvas></div>
+  </div>
+</div>
+
+{% if top_dia %}
+<div class="data-table">
+  <div class="data-table-header"><i class="bi bi-trophy-fill" style="color:var(--mm-gold);"></i> Productos más vendidos hoy</div>
+  <table>
+    <thead><tr><th>#</th><th>Producto</th><th class="tr">Unidades</th><th class="tr">Ingreso</th></tr></thead>
+    <tbody>
+      {% for p in top_dia %}
+      <tr>
+        <td><span class="rank-num {% if forloop.counter == 1 %}rank-1{% elif forloop.counter == 2 %}rank-2{% elif forloop.counter == 3 %}rank-3{% else %}rank-n{% endif %}">{{ forloop.counter }}</span></td>
+        <td style="font-weight:600;">{{ p.producto__nombre }}</td>
+        <td class="tr"><span class="badge-pill badge-green">{{ p.cantidad }}</span></td>
+        <td class="tr" style="font-weight:700;color:var(--mm-green);">${{ p.ingreso|floatformat:2 }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+{% if por_metodo %}
+<div class="data-table">
+  <div class="data-table-header"><i class="bi bi-credit-card-2-front-fill" style="color:var(--mm-blue);"></i> Desglose por método de pago</div>
+  <table>
+    <thead><tr><th>Método</th><th class="tr">Transacciones</th><th class="tr">Propinas</th></tr></thead>
+    <tbody>
+      {% for m in por_metodo %}
+      <tr>
+        <td>{% if 'fectivo' in m.metodo_pago__descripcion|default:"" %}💵{% elif 'arjeta' in m.metodo_pago__descripcion|default:"" %}💳{% elif 'aypal' in m.metodo_pago__descripcion|default:"" %}🅿{% else %}💰{% endif %} {{ m.metodo_pago__descripcion|default:"—" }}</td>
+        <td class="tr"><span class="badge-pill badge-green">{{ m.count }}</span></td>
+        <td class="tr" style="font-weight:600;">${{ m.propinas|floatformat:2 }}</td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="3" class="text-center py-3" style="color:var(--mm-text-muted);">Sin pagos procesados en este período</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+<script>
+const COLORES = ['#3D6B4F','#6EA96E','#A8C8A8','#C9933A','#F0C97A','#1A6A8A','#5A8F6B','#D0E8D0'];
+
+function makeGradient(ctx, color, alpha1, alpha2) {
+  const g = ctx.createLinearGradient(0, 0, 0, ctx.canvas.height);
+  g.addColorStop(0, color.replace(')', `,${alpha1})`).replace('rgb', 'rgba'));
+  g.addColorStop(1, color.replace(')', `,${alpha2})`).replace('rgb', 'rgba'));
+  return g;
+}
+
+const ctxHora = document.getElementById('chartHora').getContext('2d');
+const gradHora = ctxHora.createLinearGradient(0, 0, 0, 220);
+gradHora.addColorStop(0, 'rgba(61,107,79,.85)');
+gradHora.addColorStop(1, 'rgba(61,107,79,.2)');
+
+new Chart(ctxHora, {
+  type:'bar',
+  data:{
+    labels: {{ chart_labels|safe }},
+    datasets:[
+      {label:'Ventas ($)',data:{{ chart_data|safe }},backgroundColor:gradHora,borderRadius:6,borderSkipped:false,order:2},
+      {label:'Pedidos',data:{{ chart_tickets|safe }},type:'line',borderColor:'#C9933A',backgroundColor:'rgba(201,147,58,.1)',yAxisID:'y1',tension:.4,fill:true,pointBackgroundColor:'#C9933A',pointRadius:4,order:1}
+    ]
+  },
+  options:{
+    responsive:true,
+    plugins:{legend:{position:'top',labels:{usePointStyle:true,font:{size:11}}}},
+    scales:{
+      y:{title:{display:true,text:'Ventas ($)',font:{size:11}},grid:{color:'rgba(226,221,213,.6)'},ticks:{callback:v=>'$'+v}},
+      y1:{position:'right',grid:{drawOnChartArea:false},title:{display:true,text:'Pedidos',font:{size:11}}}
+    }
+  }
+});
+
+new Chart(document.getElementById('chartMetodo'), {
+  type:'doughnut',
+  data:{
+    labels:[{% for m in por_metodo %}"{{ m.metodo_pago__descripcion|default:'Sin método' }}"{% if not forloop.last %},{% endif %}{% endfor %}],
+    datasets:[{data:[{% for m in por_metodo %}{{ m.count }}{% if not forloop.last %},{% endif %}{% endfor %}],backgroundColor:COLORES,borderWidth:3,borderColor:'#fff',hoverOffset:8}]
+  },
+  options:{
+    responsive:true,
+    plugins:{
+      legend:{position:'right',labels:{usePointStyle:true,font:{size:11}}},
+      tooltip:{callbacks:{label:ctx=>' '+ctx.label+': '+ctx.raw+' transacciones'}}
+    },
+    cutout:'60%'
+  }
+});
+
+function dlChart(canvasId, nombre) {
+  const a = document.createElement('a');
+  a.href = document.getElementById(canvasId).toDataURL('image/png');
+  a.download = 'grafica_' + nombre + '_{{ desde|date:"Y-m-d" }}.png';
+  a.click();
+}
+</script>
+
+
+<!-- ════ CORTE POR MESERO ════════════════════════════════════════ -->
+{% elif tipo == "corte_mesero" %}
+<div class="section-hero blue">
+  <div class="section-hero-orbe"></div>
+  <div style="position:relative;z-index:2;">
+    <div class="hero-glass">
+      <div class="hero-label"><i class="bi bi-person-badge me-1"></i>Corte por Mesero</div>
+      <div class="hero-title">{{ desde|date:"d/m/Y" }} — {{ hasta|date:"d/m/Y" }}</div>
+    </div>
+  </div>
+</div>
+
+{% if tabla %}
+<div class="chart-wrap" style="margin-bottom:1.25rem;">
+  <div class="chart-head">
+    <div class="chart-title"><i class="bi bi-bar-chart-fill"></i> Ventas por mesero</div>
+    <div class="chart-actions">
+      <button class="btn-dl" onclick="dlChart('chartMeseros','corte_mesero')"><i class="bi bi-download"></i> PNG</button>
+    </div>
+  </div>
+  <div class="chart-body"><canvas id="chartMeseros"></canvas></div>
+</div>
+<div class="data-table">
+  <div class="data-table-header"><i class="bi bi-people-fill" style="color:var(--mm-blue);"></i> Detalle por mesero</div>
+  <table>
+    <thead>
+      <tr><th>#</th><th>Mesero</th><th class="tr">Pedidos</th><th class="tr">Ventas</th><th class="tr">Propinas</th><th class="tr">Ticket prom.</th><th class="tr">Cancelaciones</th></tr>
+    </thead>
+    <tbody>
+      {% for r in tabla %}
+      <tr>
+        <td><span class="rank-num {% if forloop.counter == 1 %}rank-1{% elif forloop.counter == 2 %}rank-2{% elif forloop.counter == 3 %}rank-3{% else %}rank-n{% endif %}">{{ forloop.counter }}</span></td>
+        <td class="fw-semibold">{{ r.nombre }}</td>
+        <td class="tr"><span class="badge-pill badge-green">{{ r.pedidos }}</span></td>
+        <td class="tr fw-bold" style="color:var(--mm-green);">${{ r.ventas|floatformat:2 }}</td>
+        <td class="tr">${{ r.propinas|floatformat:2 }}</td>
+        <td class="tr">${{ r.promedio|floatformat:2 }}</td>
+        <td class="tr {% if r.cancelados > 0 %}text-danger fw-bold{% else %}text-muted{% endif %}">{{ r.cancelados }}</td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="7" class="text-center py-4" style="color:var(--mm-text-muted);">Sin datos en el período</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+<script>
+(function(){
+  const ctxM = document.getElementById('chartMeseros').getContext('2d');
+  const gV = ctxM.createLinearGradient(0,0,0,260);
+  gV.addColorStop(0,'rgba(61,107,79,.9)'); gV.addColorStop(1,'rgba(61,107,79,.3)');
+  const gP = ctxM.createLinearGradient(0,0,0,260);
+  gP.addColorStop(0,'rgba(201,147,58,.9)'); gP.addColorStop(1,'rgba(201,147,58,.3)');
+  new Chart(ctxM,{
+    type:'bar',
+    data:{
+      labels:{{ chart_labels|safe }},
+      datasets:[
+        {label:'Ventas ($)',data:{{ chart_data|safe }},backgroundColor:gV,yAxisID:'y'},
+        {label:'Propinas ($)',data:{{ chart_propinas|safe }},backgroundColor:gP,yAxisID:'y1'}
+      ]
+    },
+    options:{
+      responsive:true,
+      interaction:{mode:'index'},
+      plugins:{legend:{position:'top'}},
+      scales:{
+        y:{ticks:{callback:v=>'$'+v},title:{display:true,text:'Ventas'}},
+        y1:{position:'right',grid:{drawOnChartArea:false},ticks:{callback:v=>'$'+v},title:{display:true,text:'Propinas'}}
+      }
+    }
+  });
+  function dlChart(id,n){const a=document.createElement('a');a.href=document.getElementById(id).toDataURL('image/png');a.download='grafica_'+n+'_{{ desde|date:"Y-m-d" }}.png';a.click();}
+  window.dlChart=dlChart;
+})();
+</script>
+{% else %}
+<div class="text-center py-5" style="color:var(--mm-text-muted);">Sin datos en el período seleccionado.</div>
+{% endif %}
+
+
+<!-- ════ VENTAS POR DÍA / SEMANA / MES ════════════════════════ -->
+{% elif tipo in "ventas_dia,ventas_semana,ventas_mes" %}
+<div class="section-hero blue">
+  <div class="section-hero-orbe"></div>
+  <div style="position:relative;z-index:2;">
+    <div class="hero-glass">
+      <div class="hero-label"><i class="bi bi-graph-up-arrow me-1"></i>
+        {% if tipo == "ventas_dia" %}Ventas por Día{% elif tipo == "ventas_semana" %}Ventas por Semana{% else %}Ventas por Mes{% endif %}
+      </div>
+      <div class="hero-title">{{ desde|date:"d/m/Y" }} — {{ hasta|date:"d/m/Y" }}</div>
+    </div>
+  </div>
+</div>
+{% if tabla %}
+<div class="chart-wrap">
+  <div class="chart-head">
+    <div class="chart-title">
+      <i class="bi bi-graph-up-arrow"></i>
+      {% if tipo == "ventas_dia" %}Ventas por día{% elif tipo == "ventas_semana" %}Ventas por semana{% else %}Ventas por mes{% endif %}
+    </div>
+    <div class="chart-actions">
+      <button class="btn-dl" onclick="dlChart('mainChart','{{ tipo }}')"><i class="bi bi-download"></i> PNG</button>
+    </div>
+  </div>
+  <div class="chart-body"><canvas id="mainChart" height="90"></canvas></div>
+</div>
+<div class="data-table">
+  <div class="data-table-header"><i class="bi bi-table" style="color:var(--mm-blue);"></i> Detalle del período</div>
+  <table data-paginate="20">
+    <thead><tr><th>Período</th><th class="tr">Pedidos</th><th class="tr">Ventas</th>{% if tipo == "ventas_mes" %}<th class="tr">Ticket prom.</th>{% endif %}</tr></thead>
+    <tbody>
+      {% for r in tabla %}
+      <tr>
+        <td>{% if tipo == "ventas_dia" %}{{ r.fecha }}{% elif tipo == "ventas_semana" %}Semana {{ r.semana|date:"d/m/Y" }}{% else %}{{ r.mes|date:"F Y" }}{% endif %}</td>
+        <td class="tr"><span class="badge-pill badge-green">{{ r.tickets }}</span></td>
+        <td class="tr fw-bold" style="color:var(--mm-green);">${{ r.total|floatformat:2 }}</td>
+        {% if tipo == "ventas_mes" %}<td class="tr">${{ r.promedio|floatformat:2 }}</td>{% endif %}
+      </tr>
+      {% empty %}
+      <tr><td colspan="4" class="text-center py-4" style="color:var(--mm-text-muted);">Sin datos</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+<script>
+(function(){
+  const ctxMain = document.getElementById('mainChart').getContext('2d');
+  const gradMain = ctxMain.createLinearGradient(0,0,0,300);
+  gradMain.addColorStop(0,'rgba(26,106,138,.85)'); gradMain.addColorStop(1,'rgba(26,106,138,.15)');
+  const gradLine = ctxMain.createLinearGradient(0,0,0,300);
+  gradLine.addColorStop(0,'rgba(201,147,58,.3)'); gradLine.addColorStop(1,'rgba(201,147,58,.02)');
+  new Chart(ctxMain,{
+    type:'bar',
+    data:{
+      labels:{{ chart_labels|safe }},
+      datasets:[
+        {label:'Ventas ($)',data:{{ chart_data|safe }},backgroundColor:gradMain,order:2},
+        {label:'Pedidos',data:{{ chart_tickets|safe }},type:'line',borderColor:'#C9933A',backgroundColor:gradLine,yAxisID:'y1',fill:true,pointBackgroundColor:'#C9933A',borderWidth:2.5,order:1}
+      ]
+    },
+    options:{
+      responsive:true,
+      interaction:{mode:'index'},
+      plugins:{legend:{position:'top'}},
+      scales:{
+        y:{ticks:{callback:v=>'$'+v},title:{display:true,text:'Ventas ($)'}},
+        y1:{position:'right',grid:{drawOnChartArea:false},title:{display:true,text:'Pedidos'}}
+      }
+    }
+  });
+  function dlChart(id,n){const a=document.createElement('a');a.href=document.getElementById(id).toDataURL('image/png');a.download='grafica_'+n+'_{{ desde|date:"Y-m-d" }}.png';a.click();}
+  window.dlChart=dlChart;
+})();
+</script>
+{% else %}
+<div class="text-center py-5" style="color:var(--mm-text-muted);">Sin datos en el período seleccionado.</div>
+{% endif %}
+
+
+<!-- ════ MÉTODO DE PAGO ════════════════════════════════════════ -->
+{% elif tipo == "ventas_metodo" %}
+<div class="section-hero blue">
+  <div class="section-hero-orbe"></div>
+  <div style="position:relative;z-index:2;">
+    <div class="hero-glass">
+      <div class="hero-label"><i class="bi bi-credit-card me-1"></i>Ventas por Método de Pago</div>
+      <div class="hero-title">{{ desde|date:"d/m/Y" }} — {{ hasta|date:"d/m/Y" }}</div>
+    </div>
+  </div>
+</div>
+{% if tabla %}
+<div style="display:grid;grid-template-columns:1fr 360px;gap:1.25rem;">
+  <div class="data-table" style="margin-bottom:0;">
+    <div class="data-table-header"><i class="bi bi-credit-card-fill" style="color:var(--mm-blue);"></i> Métodos de pago</div>
+    <table>
+      <thead><tr><th>Método</th><th class="tr">Transacciones</th><th class="tr">Propinas</th></tr></thead>
+      <tbody>
+        {% for r in tabla %}
+        <tr>
+          <td style="font-weight:600;">{{ r.metodo_pago__descripcion|default:"Sin método" }}</td>
+          <td class="tr"><span class="badge-pill badge-green">{{ r.count }}</span></td>
+          <td class="tr" style="font-weight:600;">${{ r.propinas|floatformat:2 }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="chart-wrap" style="align-self:start;margin-bottom:0;">
+    <div class="chart-head">
+      <div class="chart-title"><i class="bi bi-pie-chart-fill"></i> Distribución</div>
+      <div class="chart-actions"><button class="btn-dl" onclick="dlChart('chartMet','metodo')"><i class="bi bi-download"></i></button></div>
+    </div>
+    <div class="chart-body"><canvas id="chartMet"></canvas></div>
+  </div>
+</div>
+<script>
+(function(){
+  const COLS=['#3D6B4F','#C9933A','#1A6A8A','#8B4A2A','#5A8F6B','#D0A860'];
+  new Chart(document.getElementById('chartMet'),{
+    type:'doughnut',
+    data:{labels:{{ chart_labels|safe }},datasets:[{data:{{ chart_data|safe }},backgroundColor:COLS,borderWidth:4,borderColor:'#fff',hoverOffset:10}]},
+    options:{responsive:true,plugins:{legend:{position:'bottom'}},cutout:'62%'}
+  });
+  function dlChart(id,n){const a=document.createElement('a');a.href=document.getElementById(id).toDataURL('image/png');a.download='grafica_'+n+'.png';a.click();}
+  window.dlChart=dlChart;
+})();
+</script>
+{% else %}
+<div class="text-center py-5" style="color:var(--mm-text-muted);">Sin pagos procesados en el período.</div>
+{% endif %}
+
+
+<!-- ════ TOP PRODUCTOS / MENOS VENDIDOS ════════════════════════ -->
+{% elif tipo == "top_productos" or tipo == "menos_vendidos" %}
+<div class="section-hero {% if tipo == 'top_productos' %}gold{% else %}danger{% endif %}">
+  <div class="section-hero-orbe"></div>
+  <div style="position:relative;z-index:2;">
+    <div class="hero-glass">
+      <div class="hero-label">
+        {% if tipo == "top_productos" %}<i class="bi bi-trophy-fill me-1"></i>Top Productos
+        {% else %}<i class="bi bi-graph-down-arrow me-1"></i>Menor Rotación{% endif %}
+      </div>
+      <div class="hero-title">{{ desde|date:"d/m/Y" }} — {{ hasta|date:"d/m/Y" }}</div>
+    </div>
+  </div>
+</div>
+{% if tabla %}
+<div class="chart-wrap" style="margin-bottom:1.25rem;">
+  <div class="chart-head">
+    <div class="chart-title">
+      {% if tipo == "top_productos" %}<i class="bi bi-trophy-fill" style="color:var(--mm-gold);"></i> Top 15 más vendidos
+      {% else %}<i class="bi bi-graph-down-arrow" style="color:var(--mm-danger);"></i> Menor rotación{% endif %}
+    </div>
+    <div class="chart-actions"><button class="btn-dl" onclick="dlChart('chartProd','{{ tipo }}')"><i class="bi bi-download"></i> PNG</button></div>
+  </div>
+  <div class="chart-body"><canvas id="chartProd" height="120"></canvas></div>
+</div>
+<div class="data-table">
+  <div class="data-table-header">
+    {% if tipo == "top_productos" %}<i class="bi bi-trophy-fill" style="color:var(--mm-gold);"></i> Ranking de productos
+    {% else %}<i class="bi bi-graph-down-arrow" style="color:var(--mm-danger);"></i> Menor rotación{% endif %}
+  </div>
+  <table>
+    <thead><tr><th>#</th><th>Producto</th><th class="tr">Unidades</th><th class="tr">Ingreso</th></tr></thead>
+    <tbody>
+      {% for r in tabla %}
+      <tr>
+        <td><span class="rank-num {% if forloop.counter == 1 %}rank-1{% elif forloop.counter == 2 %}rank-2{% elif forloop.counter == 3 %}rank-3{% else %}rank-n{% endif %}">{{ forloop.counter }}</span></td>
+        <td style="font-weight:600;">{{ r.producto__nombre }}</td>
+        <td class="tr"><span class="badge-pill {% if tipo == 'top_productos' %}badge-green{% else %}badge-gold{% endif %}">{{ r.cantidad }}</span></td>
+        <td class="tr fw-bold" style="color:var(--mm-green);">${{ r.ingreso|default:0|floatformat:2 }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+<script>
+(function(){
+  const ctxProd = document.getElementById('chartProd').getContext('2d');
+  const gP = ctxProd.createLinearGradient(320,0,0,0);
+  {% if tipo == "top_productos" %}
+  gP.addColorStop(0,'rgba(61,107,79,.9)'); gP.addColorStop(1,'rgba(61,107,79,.25)');
+  {% else %}
+  gP.addColorStop(0,'rgba(192,57,43,.9)'); gP.addColorStop(1,'rgba(192,57,43,.25)');
+  {% endif %}
+  const gI = ctxProd.createLinearGradient(320,0,0,0);
+  gI.addColorStop(0,'rgba(201,147,58,.8)'); gI.addColorStop(1,'rgba(201,147,58,.2)');
+  new Chart(ctxProd,{
+    type:'bar',
+    data:{
+      labels:{{ chart_labels|safe }},
+      datasets:[
+        {label:'Unidades',data:{{ chart_data|safe }},backgroundColor:gP},
+        {label:'Ingreso ($)',data:{{ chart_ingreso|safe }},backgroundColor:gI,yAxisID:'y1'}
+      ]
+    },
+    options:{
+      indexAxis:'y',
+      responsive:true,
+      plugins:{legend:{position:'top'}},
+      scales:{
+        x:{},
+        y1:{position:'right',grid:{drawOnChartArea:false},ticks:{callback:v=>'$'+v}}
+      }
+    }
+  });
+  function dlChart(id,n){const a=document.createElement('a');a.href=document.getElementById(id).toDataURL('image/png');a.download='grafica_'+n+'_{{ desde|date:"Y-m-d" }}.png';a.click();}
+  window.dlChart=dlChart;
+})();
+</script>
+{% else %}
+<div class="text-center py-5" style="color:var(--mm-text-muted);">Sin datos en el período.</div>
+{% endif %}
+
+
+<!-- ════ CATEGORÍAS ════════════════════════════════════════════ -->
+{% elif tipo == "ventas_categoria" %}
+<div class="section-hero gold">
+  <div class="section-hero-orbe"></div>
+  <div style="position:relative;z-index:2;">
+    <div class="hero-glass">
+      <div class="hero-label"><i class="bi bi-grid-fill me-1"></i>Ventas por Categoría</div>
+      <div class="hero-title">{{ desde|date:"d/m/Y" }} — {{ hasta|date:"d/m/Y" }}</div>
+    </div>
+  </div>
+</div>
+{% if tabla %}
+<div style="display:grid;grid-template-columns:1fr 380px;gap:1.25rem;">
+  <div class="data-table" style="margin-bottom:0;">
+    <div class="data-table-header"><i class="bi bi-grid-fill" style="color:var(--mm-gold);"></i> Ventas por categoría</div>
+    <table>
+      <thead><tr><th>Categoría</th><th class="tr">Unidades</th><th class="tr">Ventas</th></tr></thead>
+      <tbody>
+        {% for r in tabla %}
+        <tr>
+          <td style="font-weight:600;">{{ r.producto__categoria__nombre|default:"Sin categoría" }}</td>
+          <td class="tr"><span class="badge-pill badge-green">{{ r.cantidad }}</span></td>
+          <td class="tr fw-bold" style="color:var(--mm-green);">${{ r.total|floatformat:2 }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="chart-wrap" style="align-self:start;margin-bottom:0;">
+    <div class="chart-head">
+      <div class="chart-title"><i class="bi bi-pie-chart-fill"></i> Distribución por categoría</div>
+      <div class="chart-actions"><button class="btn-dl" onclick="dlChart('chartCat','categoria')"><i class="bi bi-download"></i></button></div>
+    </div>
+    <div class="chart-body"><canvas id="chartCat"></canvas></div>
+  </div>
+</div>
+<script>
+(function(){
+  const CC=['#3D6B4F','#C9933A','#1A6A8A','#8B4A2A','#5A8F6B','#D0A860','#2A9A8A','#E05540'];
+  new Chart(document.getElementById('chartCat'),{
+    type:'pie',
+    data:{labels:{{ chart_labels|safe }},datasets:[{data:{{ chart_data|safe }},backgroundColor:CC,borderWidth:4,borderColor:'#fff',hoverOffset:10}]},
+    options:{responsive:true,plugins:{legend:{position:'bottom'}}}
+  });
+  function dlChart(id,n){const a=document.createElement('a');a.href=document.getElementById(id).toDataURL('image/png');a.download='grafica_'+n+'.png';a.click();}
+  window.dlChart=dlChart;
+})();
+</script>
+{% endif %}
+
+
+<!-- ════ DESCUENTOS / PROMOS ════════════════════════════════════ -->
+{% elif tipo == "descuentos_productos" %}
+<div class="section-hero gold">
+  <div class="section-hero-orbe"></div>
+  <div style="position:relative;z-index:2;">
+    <div class="hero-glass">
+      <div class="hero-label"><i class="bi bi-tag-fill me-1"></i>Promociones Aplicadas</div>
+      <div class="hero-title">{{ desde|date:"d/m/Y" }} — {{ hasta|date:"d/m/Y" }}</div>
+    </div>
+  </div>
+</div>
+<div class="data-table">
+  <div class="data-table-header"><i class="bi bi-tag-fill" style="color:var(--mm-gold);"></i> Promos aplicadas</div>
+  <table>
+    <thead><tr><th>Producto</th><th>Promoción</th><th class="tr">Aplicaciones</th><th class="tr">Subtotal</th></tr></thead>
+    <tbody>
+      {% for r in tabla %}
+      <tr>
+        <td style="font-weight:600;">{{ r.producto__nombre }}</td>
+        <td><span class="badge-pill badge-gold">{{ r.promocion__titulo }}</span></td>
+        <td class="tr"><span class="badge-pill badge-green">{{ r.aplicaciones }}</span></td>
+        <td class="tr fw-bold">${{ r.subtotal|floatformat:2 }}</td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="4" class="text-center py-4" style="color:var(--mm-text-muted);">Sin datos</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+
+<!-- ════ COMPARATIVA EMPLEADOS ════════════════════════════════ -->
+{% elif tipo == "comparativa_empleados" %}
+<div class="section-hero teal">
+  <div class="section-hero-orbe"></div>
+  <div style="position:relative;z-index:2;">
+    <div class="hero-glass">
+      <div class="hero-label"><i class="bi bi-people-fill me-1"></i>Comparativa de Empleados</div>
+      <div class="hero-title">{{ desde|date:"d/m/Y" }} — {{ hasta|date:"d/m/Y" }}</div>
+    </div>
+  </div>
+</div>
+{% if tabla %}
+<div class="chart-wrap">
+  <div class="chart-head">
+    <div class="chart-title"><i class="bi bi-bar-chart-steps"></i> Comparativa de ventas por empleado</div>
+    <div class="chart-actions"><button class="btn-dl" onclick="dlChart('cEmp','empleados')"><i class="bi bi-download"></i> PNG</button></div>
+  </div>
+  <div class="chart-body"><canvas id="cEmp" height="80"></canvas></div>
+</div>
+<div class="data-table">
+  <div class="data-table-header"><i class="bi bi-people-fill" style="color:var(--mm-green);"></i> Resultados por empleado</div>
+  <table>
+    <thead><tr><th>#</th><th>Empleado</th><th class="tr">Pedidos</th><th class="tr">Ventas</th></tr></thead>
+    <tbody>
+      {% for r in tabla %}
+      <tr>
+        <td><span class="rank-num {% if forloop.counter == 1 %}rank-1{% elif forloop.counter == 2 %}rank-2{% elif forloop.counter == 3 %}rank-3{% else %}rank-n{% endif %}">{{ forloop.counter }}</span></td>
+        <td class="fw-semibold">{{ r.nombre }}</td>
+        <td class="tr"><span class="badge-pill badge-green">{{ r.pedidos }}</span></td>
+        <td class="tr fw-bold" style="color:var(--mm-green);">${{ r.ventas|floatformat:2 }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+<script>
+(function(){
+  const ctxE = document.getElementById('cEmp').getContext('2d');
+  const gV = ctxE.createLinearGradient(0,0,0,260);
+  gV.addColorStop(0,'rgba(26,122,106,.9)'); gV.addColorStop(1,'rgba(26,122,106,.25)');
+  const gP = ctxE.createLinearGradient(0,0,0,260);
+  gP.addColorStop(0,'rgba(201,147,58,.9)'); gP.addColorStop(1,'rgba(201,147,58,.25)');
+  new Chart(ctxE,{
+    type:'bar',
+    data:{
+      labels:{{ chart_labels|safe }},
+      datasets:[
+        {label:'Ventas ($)',data:{{ chart_data|safe }},backgroundColor:gV},
+        {label:'Pedidos',data:{{ chart_pedidos|safe }},backgroundColor:gP,yAxisID:'y1'}
+      ]
+    },
+    options:{
+      responsive:true,
+      interaction:{mode:'index'},
+      plugins:{legend:{position:'top'}},
+      scales:{y:{ticks:{callback:v=>'$'+v},title:{display:true,text:'Ventas'}},y1:{position:'right',grid:{drawOnChartArea:false},title:{display:true,text:'Pedidos'}}}
+    }
+  });
+  function dlChart(id,n){const a=document.createElement('a');a.href=document.getElementById(id).toDataURL('image/png');a.download='grafica_'+n+'.png';a.click();}
+  window.dlChart=dlChart;
+})();
+</script>
+{% endif %}
+
+
+<!-- ════ TIEMPO DE ATENCIÓN ════════════════════════════════════ -->
+{% elif tipo == "tiempo_atencion" %}
+<div class="section-hero teal">
+  <div class="section-hero-orbe"></div>
+  <div style="position:relative;z-index:2;">
+    <div class="hero-glass">
+      <div class="hero-label"><i class="bi bi-stopwatch me-1"></i>Tiempo de Atención</div>
+      <div class="hero-title">{{ desde|date:"d/m/Y" }} — {{ hasta|date:"d/m/Y" }}</div>
+    </div>
+  </div>
+  {% if global_min %}
+  <div class="hero-divider"></div>
+  <div class="hero-kpis">
+    <div class="hero-kpi">
+      <div class="val">{{ global_min }} min</div>
+      <div class="lbl"><i class="bi bi-stopwatch-fill me-1"></i>Tiempo promedio global</div>
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% if tabla %}
+<div class="chart-wrap">
+  <div class="chart-head">
+    <div class="chart-title"><i class="bi bi-stopwatch"></i> Tiempo promedio por mesero (minutos)</div>
+    <div class="chart-actions"><button class="btn-dl" onclick="dlChart('cTiempo','tiempo')"><i class="bi bi-download"></i> PNG</button></div>
+  </div>
+  <div class="chart-body"><canvas id="cTiempo" height="80"></canvas></div>
+</div>
+<div class="data-table">
+  <div class="data-table-header"><i class="bi bi-stopwatch-fill" style="color:var(--mm-gold);"></i> Detalle por mesero</div>
+  <table>
+    <thead><tr><th>Mesero</th><th class="tr">Pedidos</th><th class="tr">Tiempo promedio</th></tr></thead>
+    <tbody>
+      {% for r in tabla %}
+      <tr>
+        <td class="fw-semibold">{{ r.nombre }}</td>
+        <td class="tr"><span class="badge-pill badge-green">{{ r.pedidos }}</span></td>
+        <td class="tr" style="font-weight:700;color:var(--mm-blue);">{{ r.tiempo_min }} min</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+<script>
+(function(){
+  const ctxT = document.getElementById('cTiempo').getContext('2d');
+  const gradT = ctxT.createLinearGradient(0,0,0,240);
+  gradT.addColorStop(0,'rgba(201,147,58,.9)'); gradT.addColorStop(1,'rgba(201,147,58,.2)');
+  new Chart(ctxT,{
+    type:'bar',
+    data:{labels:{{ chart_labels|safe }},datasets:[{label:'Minutos',data:{{ chart_data|safe }},backgroundColor:gradT}]},
+    options:{responsive:true,plugins:{legend:{position:'top'}},scales:{y:{title:{display:true,text:'Minutos'}}}}
+  });
+  function dlChart(id,n){const a=document.createElement('a');a.href=document.getElementById(id).toDataURL('image/png');a.download='grafica_'+n+'.png';a.click();}
+  window.dlChart=dlChart;
+})();
+</script>
+{% endif %}
+
+
+<!-- ════ MESAS UTILIZADAS ════════════════════════════════════ -->
+{% elif tipo == "mesas_utilizadas" %}
+<div class="section-hero green">
+  <div class="section-hero-orbe"></div>
+  <div style="position:relative;z-index:2;">
+    <div class="hero-glass">
+      <div class="hero-label"><i class="bi bi-layout-three-columns me-1"></i>Uso de Mesas</div>
+      <div class="hero-title">{{ desde|date:"d/m/Y" }} — {{ hasta|date:"d/m/Y" }}</div>
+    </div>
+  </div>
+</div>
+{% if tabla %}
+<div class="chart-wrap">
+  <div class="chart-head">
+    <div class="chart-title"><i class="bi bi-layout-three-columns"></i> Pedidos por mesa</div>
+    <div class="chart-actions"><button class="btn-dl" onclick="dlChart('cMesas','mesas')"><i class="bi bi-download"></i> PNG</button></div>
+  </div>
+  <div class="chart-body"><canvas id="cMesas" height="80"></canvas></div>
+</div>
+<div class="data-table">
+  <div class="data-table-header"><i class="bi bi-grid-3x3" style="color:var(--mm-green);"></i> Uso de mesas</div>
+  <table>
+    <thead><tr><th>Mesa</th><th class="tr">Pedidos</th><th class="tr">Ventas</th></tr></thead>
+    <tbody>
+      {% for r in tabla %}
+      <tr>
+        <td class="fw-semibold">Mesa {{ r.sesion__mesa__numero_mesa }}</td>
+        <td class="tr"><span class="badge-pill badge-green">{{ r.pedidos }}</span></td>
+        <td class="tr fw-bold" style="color:var(--mm-green);">${{ r.ventas|floatformat:2 }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+<script>
+(function(){
+  const ctxM = document.getElementById('cMesas').getContext('2d');
+  const gradM = ctxM.createLinearGradient(0,0,0,240);
+  gradM.addColorStop(0,'rgba(61,107,79,.9)'); gradM.addColorStop(1,'rgba(61,107,79,.2)');
+  new Chart(ctxM,{
+    type:'bar',
+    data:{labels:{{ chart_labels|safe }},datasets:[{label:'Pedidos',data:{{ chart_data|safe }},backgroundColor:gradM}]},
+    options:{responsive:true,plugins:{legend:{position:'top'}},scales:{y:{title:{display:true,text:'Pedidos'}}}}
+  });
+  function dlChart(id,n){const a=document.createElement('a');a.href=document.getElementById(id).toDataURL('image/png');a.download='grafica_'+n+'.png';a.click();}
+  window.dlChart=dlChart;
+})();
+</script>
+{% endif %}
+
+
+<!-- ════ CANCELACIONES ════════════════════════════════════════ -->
+{% elif tipo == "cancelaciones" %}
+<div class="section-hero danger">
+  <div class="section-hero-orbe"></div>
+  <div style="position:relative;z-index:2;">
+    <div class="hero-glass">
+      <div class="hero-label"><i class="bi bi-x-circle me-1"></i>Cancelaciones</div>
+      <div class="hero-title">{{ desde|date:"d/m/Y" }} — {{ hasta|date:"d/m/Y" }}</div>
+    </div>
+  </div>
+  <div class="hero-divider"></div>
+  <div class="hero-kpis">
+    <div class="hero-kpi">
+      <div class="val">{{ total_cancelaciones }}</div>
+      <div class="lbl"><i class="bi bi-x-circle-fill me-1"></i>Total cancelaciones</div>
+    </div>
+  </div>
+</div>
+{% if por_mesero %}
+<div class="data-table" style="margin-bottom:1.25rem;">
+  <div class="data-table-header"><i class="bi bi-person-x" style="color:var(--mm-danger);"></i> Cancelaciones por mesero</div>
+  <table>
+    <thead><tr><th>Mesero</th><th class="tr">Cancelaciones</th></tr></thead>
+    <tbody>
+      {% for r in por_mesero %}
+      <tr>
+        <td class="fw-semibold">{{ r.empleado_entrega__nombre|default:"—" }}</td>
+        <td class="tr text-danger fw-bold">{{ r.cantidad }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+<div class="data-table">
+  <div class="data-table-header"><i class="bi bi-list-ul"></i> Registro completo</div>
+  <table data-paginate="20">
+    <thead><tr><th>#</th><th>Fecha</th><th>Mesa</th><th>Mesero</th><th>Motivo</th></tr></thead>
+    <tbody>
+      {% for p in cancelados %}
+      <tr>
+        <td style="color:var(--mm-text-muted);font-weight:600;">#{{ p.pk }}</td>
+        <td style="white-space:nowrap;font-size:.8rem;">{{ p.fecha_hora_ingreso|date:"d/m H:i" }}</td>
+        <td>{% if p.sesion and p.sesion.mesa %}{{ p.sesion.mesa.numero_mesa }}{% else %}—{% endif %}</td>
+        <td>{% if p.empleado_entrega %}{{ p.empleado_entrega.nombre }}{% else %}—{% endif %}</td>
+        <td style="max-width:250px;word-break:break-word;font-size:.8rem;color:var(--mm-text-muted);">{{ p.motivo_cancelacion|default:"—" }}</td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="5" class="text-center py-4" style="color:var(--mm-text-muted);">Sin cancelaciones en el período</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% endif %}
+
+
+<!-- ══════════════════════════════════════════════════════════════
+     MODAL — Exportar reporte personalizado
+══════════════════════════════════════════════════════════════ -->
+<div class="modal fade" id="exportModal" tabindex="-1" aria-labelledby="exportModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content" style="border-radius:var(--radius-md);border:1px solid var(--mm-border);overflow:hidden;">
+
+      <div class="modal-header" style="background:linear-gradient(135deg,var(--mm-green-dark),var(--mm-green));border:none;padding:1.25rem 1.5rem;">
+        <div>
+          <h5 class="modal-title" id="exportModalLabel" style="color:#fff;font-weight:800;font-size:1rem;margin:0;">
+            <i class="bi bi-sliders me-2"></i>Exportar reporte personalizado
+          </h5>
+          <p style="color:rgba(255,255,255,.65);font-size:.75rem;margin:.2rem 0 0;">Elige el formato y las secciones a incluir</p>
+        </div>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+
+      <div class="modal-body" style="padding:1.5rem;">
+
+        <!-- Período -->
+        <div style="background:var(--mm-cream);border:1px solid var(--mm-border);border-radius:var(--radius-sm);padding:.7rem 1rem;margin-bottom:1.25rem;display:flex;align-items:center;gap:.6rem;font-size:.82rem;">
+          <i class="bi bi-calendar3" style="color:var(--mm-green);font-size:1rem;"></i>
+          <span style="color:var(--mm-text-muted);font-weight:700;">Período:</span>
+          <span style="font-weight:800;font-family:var(--font-mono);font-size:.85rem;">{{ desde|date:"d/m/Y" }} – {{ hasta|date:"d/m/Y" }}</span>
+        </div>
+
+        <!-- Formato -->
+        <div style="margin-bottom:1.25rem;">
+          <div style="font-size:.68rem;font-weight:800;text-transform:uppercase;letter-spacing:.1em;color:var(--mm-text-muted);margin-bottom:.6rem;">
+            <i class="bi bi-file-earmark me-1"></i>Formato de exportación
+          </div>
+          <div style="display:flex;gap:.6rem;">
+            <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;padding:.55rem 1rem;border:2px solid #C0392B;border-radius:var(--radius-sm);background:#fff5f5;font-size:.82rem;font-weight:700;" id="lbl-pdf">
+              <input type="radio" name="expFormato" value="pdf" checked style="accent-color:#C0392B;">
+              <i class="bi bi-file-earmark-pdf" style="color:#C0392B;font-size:1.1rem;"></i> PDF
+            </label>
+          </div>
+          <p style="margin:.5rem 0 0;font-size:.71rem;color:var(--mm-text-muted);">
+            <i class="bi bi-info-circle me-1"></i>Las gráficas se incluyen automáticamente en cada sección.
+          </p>
+        </div>
+
+        <!-- Secciones -->
+        <div style="font-size:.68rem;font-weight:800;text-transform:uppercase;letter-spacing:.1em;color:var(--mm-text-muted);margin-bottom:.65rem;">
+          <i class="bi bi-list-check me-1"></i>Secciones a incluir
+        </div>
+        <div style="display:flex;gap:.4rem;margin-bottom:.85rem;flex-wrap:wrap;">
+          <button type="button" class="btn btn-sm" onclick="toggleAll(true)" style="font-size:.74rem;background:var(--mm-cream-dark);padding:.28rem .65rem;border-radius:var(--radius-pill);">
+            <i class="bi bi-check2-all me-1"></i>Todas
+          </button>
+          <button type="button" class="btn btn-sm" onclick="toggleAll(false)" style="font-size:.74rem;background:var(--mm-cream-dark);padding:.28rem .65rem;border-radius:var(--radius-pill);">
+            <i class="bi bi-x-lg me-1"></i>Ninguna
+          </button>
+          <button type="button" class="btn btn-sm" onclick="seleccionarActual()" style="font-size:.74rem;background:var(--mm-green-pale);color:var(--mm-green);padding:.28rem .65rem;border-radius:var(--radius-pill);border:1.5px solid rgba(61,107,79,.3);">
+            <i class="bi bi-eye me-1"></i>Solo la actual
+          </button>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:.3rem .9rem;background:var(--mm-cream);border:1px solid var(--mm-border);border-radius:var(--radius-sm);padding:.85rem 1rem;">
+          <div class="exp-cat-hdr"><i class="bi bi-scissors"></i>Cortes</div>
+          <label class="exp-chk"><input type="checkbox" value="corte_dia" checked> Corte del día</label>
+          <label class="exp-chk"><input type="checkbox" value="corte_mesero" checked> Corte por mesero</label>
+
+          <div class="exp-cat-hdr"><i class="bi bi-graph-up-arrow"></i>Ventas</div>
+          <label class="exp-chk"><input type="checkbox" value="ventas_dia" checked> Por día</label>
+          <label class="exp-chk"><input type="checkbox" value="ventas_semana" checked> Por semana</label>
+          <label class="exp-chk"><input type="checkbox" value="ventas_mes" checked> Por mes</label>
+          <label class="exp-chk"><input type="checkbox" value="ventas_metodo" checked> Por método de pago</label>
+
+          <div class="exp-cat-hdr"><i class="bi bi-bag-fill"></i>Productos</div>
+          <label class="exp-chk"><input type="checkbox" value="top_productos" checked> Más vendidos</label>
+          <label class="exp-chk"><input type="checkbox" value="menos_vendidos" checked> Menos vendidos</label>
+          <label class="exp-chk"><input type="checkbox" value="ventas_categoria" checked> Por categoría</label>
+          <label class="exp-chk"><input type="checkbox" value="descuentos_productos" checked> Promos aplicadas</label>
+
+          <div class="exp-cat-hdr"><i class="bi bi-people-fill"></i>Equipo</div>
+          <label class="exp-chk"><input type="checkbox" value="comparativa_empleados" checked> Comparativa de empleados</label>
+          <label class="exp-chk"><input type="checkbox" value="tiempo_atencion" checked> Tiempo de atención</label>
+
+          <div class="exp-cat-hdr"><i class="bi bi-table"></i>Operativo</div>
+          <label class="exp-chk"><input type="checkbox" value="mesas_utilizadas" checked> Mesas utilizadas</label>
+          <label class="exp-chk"><input type="checkbox" value="cancelaciones" checked> Cancelaciones</label>
+        </div>
+
+        <div id="expError" style="display:none;color:#C0392B;font-size:.78rem;margin-top:.75rem;background:#fef2f2;border:1px solid #fca5a5;border-radius:var(--radius-sm);padding:.5rem .85rem;">
+          <i class="bi bi-exclamation-triangle me-1"></i>Selecciona al menos una sección para exportar.
+        </div>
+      </div>
+
+      <div class="modal-footer" style="border-top:1px solid var(--mm-border);gap:.5rem;padding:.85rem 1.5rem;">
+        <button type="button" class="btn btn-sm" data-bs-dismiss="modal"
+                style="background:var(--mm-cream-dark);font-size:.82rem;padding:.42rem 1.1rem;border-radius:var(--radius-sm);">
+          Cancelar
+        </button>
+        <button type="button" class="btn btn-sm" onclick="descargarReporte()"
+                style="background:var(--mm-green);color:#fff;font-weight:700;font-size:.82rem;padding:.42rem 1.3rem;border-radius:var(--radius-sm);box-shadow:0 2px 8px rgba(61,107,79,.3);">
+          <i class="bi bi-download me-1"></i>Descargar
+        </button>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script>
+const _EXP_DESDE = "{{ desde|date:'Y-m-d' }}";
+const _EXP_HASTA = "{{ hasta|date:'Y-m-d' }}";
+const _EXP_TIPO  = "{{ tipo }}";
+
+function toggleAll(state) {
+  document.querySelectorAll('#exportModal input[type="checkbox"]').forEach(cb => { cb.checked = state; });
+}
+
+function seleccionarActual() {
+  toggleAll(false);
+  const cb = document.querySelector(`#exportModal input[value="${_EXP_TIPO}"]`);
+  if (cb) cb.checked = true;
+}
+
+
+function descargarReporte() {
+  const secciones = Array.from(document.querySelectorAll('#exportModal input[type="checkbox"]:checked')).map(cb => cb.value);
+  if (!secciones.length) { document.getElementById('expError').style.display = 'block'; return; }
+  document.getElementById('expError').style.display = 'none';
+  const formato = document.querySelector('input[name="expFormato"]:checked').value;
+  const params  = new URLSearchParams({ formato, desde: _EXP_DESDE, hasta: _EXP_HASTA });
+  secciones.forEach(s => params.append('secciones', s));
+  bootstrap.Modal.getInstance(document.getElementById('exportModal')).hide();
+  window.location.href = "{% url 'gerente:reportes_exportar_custom' %}?" + params.toString();
+}
+</script>
+
+{% endblock %}

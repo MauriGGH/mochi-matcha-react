@@ -1,0 +1,809 @@
+{% extends "base/staff_base.html" %}
+{% load static %}
+
+{% comment %}=========================================================================
+   floor_plan.html — Mapa de mesas en tiempo real para el gerente.
+   Muestra el estado de cada mesa (libre / ocupada / en cocina / cobrando),
+   permite seleccionar una mesa para ver sesiones, pedidos, solicitudes de
+   pago y resumen de consumo. Incluye modales para cancelar pedidos, procesar
+   pagos (efectivo / tarjeta / mixto) y agregar pedidos asistidos.
+   El contenido se refresca cada 3 segundos via polling (pollMesas).
+   ========================================================================={% endcomment %}
+
+{% block title %}Floor Plan{% endblock %}
+{% block page_title %}Floor Plan{% endblock %}
+
+
+{# ── Navegación lateral del panel gerente ── #}
+{% block sidebar_nav %}
+<a href="{% url 'gerente:floor_plan' %}" class="active"><i class="bi bi-grid-fill"></i> Floor Plan</a>
+<div class="nav-section-label">Gestión</div>
+<a href="{% url 'gerente:productos' %}"><i class="bi bi-basket-fill"></i> Gestión de Menú</a>
+<div class="nav-section-label">Reportes</div>
+<a href="{% url 'gerente:reportes' %}"><i class="bi bi-bar-chart-fill"></i> Reportes</a>
+<div class="nav-section-label">Admin</div>
+<a href="{% url 'gerente:empleados' %}"><i class="bi bi-people-fill"></i> Empleados</a>
+<a href="{% url 'gerente:configuracion' %}"><i class="bi bi-gear-fill"></i> Configuración</a>
+{% endblock %}
+
+{# ── Indicador rápido en la barra superior: pedidos listos para entregar ── #}
+{% block topbar_actions %}
+{% if listos_count > 0 %}
+<a href="#" class="btn btn-sm rounded-pill px-3" style="background:var(--mm-green-pale); color:var(--mm-green); font-size:.78rem; text-decoration:none;">
+  <i class="bi bi-check2-circle me-1"></i>{{ listos_count }} listos para entregar
+</a>
+{% endif %}
+{% endblock %}
+
+{% block content %}
+{# ── Contenedor principal: grid de mesas (izquierda) + panel lateral (derecha) ── #}
+<div class="d-flex gap-3" style="height:calc(100vh - 56px - 3rem); overflow:hidden;">
+
+  <!-- Floor Plan -->
+  {# ── Columna principal: encabezado, leyenda y grilla de mesas ── #}
+  <div class="flex-grow-1 overflow-y-auto">
+    <div class="d-flex align-items-center justify-content-between mb-3">
+      <div>
+        <h5 class="fw-bold mb-0">Floor Plan</h5>
+        {# Resumen dinámico actualizado por pollMesas(): "X activas · Y libres" #}
+        <p style="font-size:.8rem; color:var(--mm-text-muted); margin-bottom:0;" id="mesasSummary">Cargando…</p>
+      </div>
+      {% if listos_count > 0 %}
+      <span class="badge rounded-pill px-3 py-2" style="background:var(--mm-green-pale); color:var(--mm-green); font-size:.78rem;">
+        <i class="bi bi-check2-circle me-1"></i>{{ listos_count }} listos para entregar
+      </span>
+      {% endif %}
+    </div>
+
+    <!-- Legend -->
+    {# ── Leyenda de colores del semáforo de mesas ── #}
+    <div class="d-flex gap-3 mb-3 flex-wrap">
+      <span style="font-size:.75rem; color:var(--mm-text-muted); display:flex; align-items:center; gap:.35rem;"><span style="width:10px;height:10px;border-radius:50%;background:#ccc;display:inline-block;"></span>Libre</span>
+      <span style="font-size:.75rem; color:var(--mm-text-muted); display:flex; align-items:center; gap:.35rem;"><span style="width:10px;height:10px;border-radius:50%;background:var(--mm-info);display:inline-block;"></span>Ocupada</span>
+      <span style="font-size:.75rem; color:var(--mm-text-muted); display:flex; align-items:center; gap:.35rem;"><span style="width:10px;height:10px;border-radius:50%;background:var(--mm-gold);display:inline-block;"></span>En cocina</span>
+      <span style="font-size:.75rem; color:var(--mm-text-muted); display:flex; align-items:center; gap:.35rem;"><span style="width:10px;height:10px;border-radius:50%;background:var(--mm-green);display:inline-block;"></span>Cobrando</span>
+    </div>
+
+    {# ── Grilla de tarjetas de mesa; cada tile se actualiza dinámicamente vía JS ── #}
+    <div class="table-grid" id="mesasGrid">
+      {% for mesa in mesas %}
+      {# Tile inicial en estado "libre"; el JS reemplaza clases y texto según el estado real ── #}
+      <div class="mesa-tile libre" id="mesa-tile-{{ mesa.pk }}" onclick="selectMesa({{ mesa.pk }}, {{ mesa.numero_mesa }})">
+        <div class="mesa-dot"></div>
+        <div class="mesa-num">{{ mesa.numero_mesa }}</div>
+        <div class="mesa-label">Libre</div>
+        <div style="font-size:.65rem; color:var(--mm-text-muted); margin-top:.2rem;">
+          <i class="bi bi-people" style="font-size:.65rem;"></i> 0
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <!-- Side Panel -->
+  {# ── Panel lateral de detalle: se muestra al hacer clic en una mesa ── #}
+  <div id="mesaPanel" style="width:380px; flex-shrink:0; background:var(--mm-white); border:1px solid var(--mm-border); border-radius:var(--radius-md); overflow:hidden; display:none; flex-direction:column;">
+    {# Cabecera del panel: nombre de mesa, estado y PIN de acceso ── #}
+    <div id="panelHeader" style="padding:1rem 1.25rem; border-bottom:1px solid var(--mm-border);">
+      <div class="d-flex align-items-center justify-content-between">
+        <div>
+          <h6 class="fw-bold mb-0" id="panelTitle">Mesa —</h6>
+          <span class="badge rounded-pill mt-1" id="panelEstado" style="font-size:.7rem;"></span>
+          <span class="badge rounded-pill mt-1 ms-1" id="panelListo" style="background:var(--mm-green-pale); color:var(--mm-green); font-size:.7rem; display:none;"></span>
+        </div>
+        <button class="btn btn-link p-0" onclick="closePanel()" style="color:var(--mm-text-muted);"><i class="bi bi-x-lg"></i></button>
+      </div>
+      <div class="mesa-panel-pin mt-2" id="panelPin" style="display:none;"></div>
+    </div>
+
+    {# ── Pestañas de navegación del panel lateral ── #}
+    <div style="display:flex; border-bottom:1px solid var(--mm-border);">
+      <button class="panel-tab active" data-tab="sesiones" onclick="switchTab('sesiones')" style="flex:1; padding:.6rem; font-size:.8rem; font-weight:600; border:none; background:none; cursor:pointer; border-bottom:2px solid transparent; color:var(--mm-text-muted);">Sesiones</button>
+      <button class="panel-tab" data-tab="pedidos" onclick="switchTab('pedidos')" style="flex:1; padding:.6rem; font-size:.8rem; font-weight:600; border:none; background:none; cursor:pointer; border-bottom:2px solid transparent; color:var(--mm-text-muted);">Pedidos</button>
+      <button class="panel-tab" data-tab="solicitudes" onclick="switchTab('solicitudes')" style="flex:1; padding:.6rem; font-size:.8rem; font-weight:600; border:none; background:none; cursor:pointer; border-bottom:2px solid transparent; color:var(--mm-text-muted);">Solicitudes</button>
+      <button class="panel-tab" data-tab="resumen" onclick="switchTab('resumen')" style="flex:1; padding:.6rem; font-size:.8rem; font-weight:600; border:none; background:none; cursor:pointer; border-bottom:2px solid transparent; color:var(--mm-text-muted);">Resumen</button>
+    </div>
+
+    {# ── Área de contenido dinámico generada por renderTab() ── #}
+    <div style="flex:1; overflow-y:auto; padding:1rem;" id="panelContent">
+      <div style="text-align:center; padding:2rem; color:var(--mm-text-muted);">
+        <div style="font-size:2rem;">🪑</div>
+        <p style="font-size:.85rem; margin-top:.5rem;">Selecciona una mesa</p>
+      </div>
+    </div>
+
+    {# ── Acción global: cerrar mesa (visible solo si la mesa está activa) ── #}
+    <div style="padding:.75rem 1rem; border-top:1px solid var(--mm-border);">
+      <button class="btn btn-outline-danger w-100 btn-sm rounded-3" id="btnCerrarMesa" onclick="cerrarMesa()" style="display:none;">
+        <i class="bi bi-door-closed me-1"></i>Cerrar mesa
+      </button>
+    </div>
+  </div>
+</div>
+
+{# ── Modal: confirmación de cancelación de pedido con campo de motivo obligatorio ── #}
+<!-- Modal: Cancelar pedido -->
+<div class="modal fade" id="cancelarModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered" style="max-width:380px;">
+    <div class="modal-content rounded-4 border-0">
+      <div class="modal-body p-4">
+        <h5 class="fw-bold mb-1 text-danger"><i class="bi bi-x-circle me-2"></i>Cancelar pedido</h5>
+        <p style="font-size:.875rem; color:var(--mm-text-muted); margin-bottom:1rem;">Esta acción no se puede deshacer. Ingresa el motivo de cancelación.</p>
+        <input type="hidden" id="cancelarPedidoId">
+        <div class="mb-4">
+          <label class="form-label fw-semibold" style="font-size:.875rem;">Motivo <span class="text-danger">*</span></label>
+          <textarea id="cancelarMotivo" class="form-control rounded-3" rows="3" placeholder="ej. Cliente cambió de opinión, producto agotado…" style="border-color:var(--mm-border); font-size:.875rem; resize:none;"></textarea>
+        </div>
+        <button class="btn btn-danger w-100 py-2 fw-bold" onclick="confirmarCancelacion()">Confirmar cancelación</button>
+        <button class="btn w-100 py-2 mt-2" style="background:var(--mm-cream-dark);" data-bs-dismiss="modal">Volver</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{# ── Modal: pedido asistido (gerente agrega productos a la sesión de un cliente) ── #}
+<!-- Pedido asistido modal (same as mesero) -->
+<div class="modal fade" id="asistidoModal" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content rounded-4 border-0">
+      <div class="modal-header border-0 pb-0">
+        <div>
+          <h5 class="modal-title fw-bold" id="asistidoTitle">Pedido asistido</h5>
+          <p class="mb-0" id="asistidoSubtitle" style="font-size:.85rem; color:var(--mm-text-muted);"></p>
+        </div>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body pt-2">
+        <p class="text-muted" style="font-size:.875rem;">Selecciona productos para añadir al pedido de este cliente.</p>
+        <div id="asistidoProductsContainer" style="max-height:400px; overflow-y:auto;"></div>
+        <div id="asistidoCartSummary" style="display:none; margin-top:1rem; padding-top:1rem; border-top:1px solid var(--mm-border);">
+          <h6 class="fw-bold mb-2">Resumen</h6>
+          <div id="asistidoCartItems"></div>
+          <div class="d-flex justify-content-between fw-bold mt-2">
+            <span>Total</span><span id="asistidoTotal" style="color:var(--mm-green);">$0.00</span>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer border-0 pt-0">
+        <button class="btn btn-primary px-4 py-2 fw-bold" onclick="confirmarAsistido()" id="btnConfirmarAsistido" disabled>
+          <i class="bi bi-send me-2"></i>Enviar a cocina
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{# ── Modal: procesamiento de pago (efectivo, tarjeta o mixto) con propina y cambio ── #}
+<!-- Modal: Procesar Pago -->
+<div class="modal fade" id="pagoModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered" style="max-width:420px;">
+    <div class="modal-content rounded-4 border-0">
+      <div class="modal-body p-4">
+        <h5 class="fw-bold mb-1">Procesar pago</h5>
+        <p style="font-size:.85rem; color:var(--mm-text-muted);" id="pagoSubtitle">Toda la mesa</p>
+
+        <!-- Desglose -->
+        {# ── Desglose numérico: subtotal, propina y total a cobrar ── #}
+        <div style="background:var(--mm-cream); border-radius:var(--radius-sm); padding:.75rem 1rem; margin-bottom:1rem;">
+          <div class="d-flex justify-content-between" style="font-size:.85rem; color:var(--mm-text-muted); margin-bottom:.25rem;">
+            <span>Subtotal</span><span id="pagoSubtotalDisp">$0.00</span>
+          </div>
+          <div class="d-flex justify-content-between" style="font-size:.85rem; color:var(--mm-text-muted); margin-bottom:.25rem;" id="pagoPropinaRow">
+            <span>Propina</span><span id="pagoPropinaDisp">$0.00</span>
+          </div>
+          <div class="d-flex justify-content-between fw-bold" style="font-size:1.2rem;">
+            <span>Total</span><span id="pagoTotal" style="color:var(--mm-green);">$0.00</span>
+          </div>
+        </div>
+
+        <!-- Métodos -->
+        {# ── Selector de método de pago (Efectivo / Tarjeta / Mixto) ── #}
+        <p class="fw-semibold mb-2" style="font-size:.875rem;">Método de pago</p>
+        <div id="metodosContainer" class="mb-3"></div>
+
+        <!-- Propina -->
+        {# ── Control de propina: botones de porcentaje rápido + campo manual ── #}
+        <div class="mb-3">
+          <label class="form-label fw-semibold" style="font-size:.875rem;">Propina <span style="color:var(--mm-text-muted); font-weight:400; font-size:.78rem;">(opcional)</span></label>
+          <div class="d-flex gap-2 mb-2">
+            <button type="button" class="btn btn-sm rounded-pill" style="background:var(--mm-cream-dark); font-size:.78rem;" onclick="setPagoPropinaP(10)">10%</button>
+            <button type="button" class="btn btn-sm rounded-pill" style="background:var(--mm-cream-dark); font-size:.78rem;" onclick="setPagoPropinaP(15)">15%</button>
+            <button type="button" class="btn btn-sm rounded-pill" style="background:var(--mm-cream-dark); font-size:.78rem;" onclick="setPagoPropinaP(20)">20%</button>
+            <button type="button" class="btn btn-sm rounded-pill" style="background:var(--mm-cream-dark); font-size:.78rem;" onclick="setPagoPropina(0)">Sin propina</button>
+          </div>
+          <div class="input-group">
+            <span class="input-group-text" style="background:var(--mm-cream); border-color:var(--mm-border);">$</span>
+            <input type="number" id="pagoPropinaInput" class="form-control" placeholder="0.00"
+                   step="0.01" min="0" inputmode="decimal"
+                   oninput="updatePagoPropina(parseFloat(this.value)||0)">
+          </div>
+        </div>
+
+        <!-- Efectivo -->
+        {# ── Sección efectivo: monto recibido y cálculo de cambio en tiempo real ── #}
+        <div class="mb-3" id="pagoEfectivoSec">
+          <label class="form-label fw-semibold" style="font-size:.875rem;">Monto recibido</label>
+          <div class="input-group">
+            <span class="input-group-text" style="background:var(--mm-cream); border-color:var(--mm-border);">$</span>
+            <input type="number" id="montoRecibido" class="form-control" placeholder="0.00"
+                   step="0.01" min="0" inputmode="decimal" oninput="calcCambio()">
+          </div>
+          <div id="cambioDisplay" style="font-size:.875rem; color:var(--mm-success); margin-top:.35rem; display:none;"></div>
+        </div>
+
+        <!-- Mixto -->
+        {# ── Sección mixto: monto en efectivo + monto en tarjeta, validados en tiempo real ── #}
+        <div class="mb-3" id="pagoMixtoSec" style="display:none;">
+          <div style="background:var(--mm-cream); border-radius:var(--radius-sm); padding:.6rem .9rem; font-size:.78rem; color:var(--mm-text-muted); margin-bottom:.6rem;">
+            <i class="bi bi-shuffle me-1"></i>La suma debe cubrir el total a pagar
+          </div>
+          <div class="mb-2">
+            <label class="form-label fw-semibold" style="font-size:.85rem;"><i class="bi bi-cash me-1"></i>Efectivo</label>
+            <div class="input-group">
+              <span class="input-group-text" style="background:var(--mm-cream); border-color:var(--mm-border);">$</span>
+              <input type="number" id="pagoEfectivo" class="form-control" placeholder="0.00"
+                     step="0.01" min="0" inputmode="decimal" oninput="calcMixtoModal()">
+            </div>
+          </div>
+          <div class="mb-1">
+            <label class="form-label fw-semibold" style="font-size:.85rem;"><i class="bi bi-credit-card me-1"></i>Tarjeta</label>
+            <div class="input-group">
+              <span class="input-group-text" style="background:var(--mm-cream); border-color:var(--mm-border);">$</span>
+              <input type="number" id="pagoTarjeta" class="form-control" placeholder="0.00"
+                     step="0.01" min="0" inputmode="decimal" oninput="calcMixtoModal()">
+            </div>
+          </div>
+          <div id="mixtoModalInfo" style="font-size:.8rem; margin-top:.35rem; display:none; padding:.4rem .75rem; border-radius:6px;"></div>
+        </div>
+
+        <div id="montoError" style="font-size:.8rem; color:#721c24; background:#FDEDEC; border-radius:6px; padding:.5rem .75rem; margin-bottom:.75rem; display:none;"></div>
+
+        <form method="post" action="{% url 'mesero:procesar_pago' %}" id="pagoForm" novalidate>
+          {% csrf_token %}
+          <input type="hidden" name="mesa_id"       id="pagoMesaId">
+          <input type="hidden" name="metodo_pago_id" id="pagoMetodoId">
+          <input type="hidden" name="sesion_id"      id="pagoSesionId">
+          <input type="hidden" name="propina"        id="pagoPropinaHidden" value="0">
+          <input type="hidden" name="monto_recibido" id="pagoMontoRecibido">
+          <input type="hidden" name="monto_efectivo" id="pagoMontoEfectivo">
+          <input type="hidden" name="monto_tarjeta"  id="pagoMontoTarjeta">
+          <button type="submit" class="btn btn-primary w-100 py-3 fw-bold" id="pagoSubmitBtn">
+            Confirmar pago — <span id="pagoBtnTotal">$0.00</span>
+          </button>
+        </form>
+        <button class="btn w-100 py-2 mt-2" style="background:var(--mm-cream-dark);" data-bs-dismiss="modal">Cancelar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<!-- ═══ MODAL: Cancelar solicitud de pago ════════════════════════════ -->
+<div class="modal fade" id="modalCancelarSolicitudGte" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content" style="border-radius:var(--radius-md);border:none;">
+      <div class="modal-body p-4">
+        <h5 class="fw-bold mb-1 text-danger"><i class="bi bi-x-circle me-2"></i>Cancelar solicitud de pago</h5>
+        <p class="text-muted mb-3" style="font-size:.9rem;">¿Confirmas que deseas cancelar esta solicitud? La mesa permanecerá activa.</p>
+        <div class="d-flex gap-2 mt-3">
+          <button class="btn flex-grow-1 py-2 fw-semibold text-danger" style="background:#FDEDEC;" onclick="ejecutarCancelarSolicitud()">
+            <i class="bi bi-x-circle me-1"></i>Sí, cancelar
+          </button>
+          <button class="btn flex-grow-1 py-2" style="background:var(--mm-cream-dark);" data-bs-dismiss="modal">Volver</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ MODAL: Confirmación genérica ════════════════════════════════ -->
+<div class="modal fade" id="modalConfirmarAccion" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content" style="border-radius:var(--radius-md);border:none;">
+      <div class="modal-body p-4">
+        <h5 class="fw-bold mb-2">Confirmar acción</h5>
+        <p id="confirmarAccionMsg" class="text-muted mb-3"></p>
+        <div class="d-flex gap-2">
+          <button id="btnConfirmarAccionOk" class="btn flex-grow-1 py-2 fw-semibold" style="background:var(--mm-danger);color:#fff;">Confirmar</button>
+          <button class="btn flex-grow-1 py-2" style="background:var(--mm-cream-dark);" data-bs-dismiss="modal">Cancelar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// Estado global del panel lateral
+const CSRF = getCsrf();
+let currentMesaId = null;   // ID de la mesa seleccionada actualmente
+let currentTab = 'sesiones'; // Pestaña activa en el panel
+let panelData = null;        // Datos JSON del endpoint detalle_mesa
+let asistidoSesionId = null; // Sesión destino del pedido asistido
+let asistidoCart = [];       // Ítems del carrito del pedido asistido
+let menuData = null;         // Bandera de menú cargado
+
+// Fetch menu for asistido
+async function fetchMenu() {
+  // Use products from categories already available in context via a simple JSON endpoint
+  // We use the gerente stats as proxy — for menu we rely on products rendered in asistidoProductsContainer
+  menuData = true; // flag
+}
+
+// Mapa de estilos visuales por estado de mesa: clase CSS, etiqueta y color del indicador
+const estadoStyles = {
+  libre:    { cls:'libre',   label:'Libre',     dot:'#ccc' },
+  ocupada:  { cls:'ocupada', label:'Ocupada',   dot:'var(--mm-info)' },
+  cocina:   { cls:'pedidos', label:'En cocina', dot:'var(--mm-gold)' },
+  listo:    { cls:'ocupada', label:'Listo!',    dot:'var(--mm-green)' },
+  cobrando: { cls:'pagando', label:'Cobrando',  dot:'var(--mm-green)' },
+  alerta:   { cls:'pedidos', label:'Alerta',  dot:'var(--mm-danger)' },
+};
+
+// pollMesas — polling cada 3 s al endpoint mesas_estado.
+// Actualiza clases CSS, etiqueta, color del dot y contador de clientes de cada tile.
+// Si hay una mesa seleccionada, recarga su panel silenciosamente.
+async function pollMesas() {
+  try {
+    const res = await fetch('{% url "gerente:mesas_estado" %}');
+    const data = await res.json();
+    if (!data.ok) return;
+    let ocupadas = 0, libres = 0;
+    data.mesas.forEach(m => {
+      const tile = document.getElementById(`mesa-tile-${m.id}`);
+      if (!tile) return;
+      const s = estadoStyles[m.estado_visual] || estadoStyles.libre;
+      tile.className = `mesa-tile ${s.cls}`;
+      tile.querySelector('.mesa-dot').style.background = s.dot;
+      tile.querySelector('.mesa-num').textContent = m.numero;
+      tile.querySelector('.mesa-label').textContent = s.label;
+      tile.querySelector('div:last-child').innerHTML = `<i class="bi bi-people" style="font-size:.65rem;"></i> ${m.clientes}`;
+      if (m.estado_visual !== 'libre') ocupadas++; else libres++;
+    });
+    document.getElementById('mesasSummary').textContent = `${ocupadas} mesas activas · ${libres} libres`;
+    if (currentMesaId) selectMesa(currentMesaId, null, true);
+  } catch(e) {}
+}
+// Inicia el polling al cargar la página
+setInterval(pollMesas, 3000);
+pollMesas();
+
+// selectMesa — carga el detalle de una mesa desde el endpoint detalle_mesa y renderiza el panel.
+// silent=true evita mostrar el panel (usado en refresco automático por polling).
+async function selectMesa(id, numero, silent=false) {
+  currentMesaId = id;
+  if (!silent) document.getElementById('mesaPanel').style.display = 'flex';
+  try {
+    const res = await fetch(`{% url "gerente:detalle_mesa" 0 %}`.replace('/0/', `/${id}/`));
+    panelData = await res.json();
+    if (!panelData.ok) return;
+    if (numero) document.getElementById('panelTitle').textContent = `Mesa ${panelData.numero_mesa}`;
+    if (panelData.pin) {
+      document.getElementById('panelPin').style.display = 'block';
+      document.getElementById('panelPin').textContent = panelData.pin;
+    }
+    const eb = document.getElementById('panelEstado');
+    eb.textContent = panelData.mesa_libre ? 'Libre' : 'Ocupada';
+    eb.style.background = panelData.mesa_libre ? 'var(--mm-cream-dark)' : 'var(--mm-green-pale)';
+    eb.style.color = panelData.mesa_libre ? 'var(--mm-text-muted)' : 'var(--mm-green)';
+    document.getElementById('btnCerrarMesa').style.display = panelData.mesa_libre ? 'none' : 'block';
+    renderTab(currentTab);
+  } catch(e) {}
+}
+
+// closePanel — cierra el panel lateral y limpia la mesa seleccionada
+function closePanel() { document.getElementById('mesaPanel').style.display = 'none'; currentMesaId = null; }
+
+// switchTab — cambia la pestaña activa del panel y re-renderiza el contenido
+function switchTab(tab) {
+  currentTab = tab;
+  document.querySelectorAll('.panel-tab').forEach(t => {
+    const a = t.dataset.tab === tab;
+    t.style.borderBottom = a ? '2px solid var(--mm-green)' : '2px solid transparent';
+    t.style.color = a ? 'var(--mm-green)' : 'var(--mm-text-muted)';
+  });
+  renderTab(tab);
+}
+
+// Paletas de color para los badges de estado de pedido
+const statusColors = { recibido:'#2471A3', preparando:'#CA8A04', listo:'#1E8449', entregado:'#566573', cancelado:'#C0392B' };
+const statusBg = { recibido:'#EBF3FD', preparando:'#FEF9E7', listo:'#EAFAF1', entregado:'#F2F3F4', cancelado:'#FDEDEC' };
+
+// renderTab — genera el HTML del contenido del panel según la pestaña activa:
+//   'sesiones'   → lista de clientes con opción de agregar pedido o cerrar sesión
+//   'pedidos'    → todos los pedidos de la mesa aplanados por sesión, con acciones
+//   'solicitudes'→ solicitudes de cuenta pendientes (cobro individual o total)
+//   'resumen'    → totales de la mesa (consumo, sesiones, pedidos)
+function renderTab(tab) {
+  const content = document.getElementById('panelContent');
+  if (!panelData) return;
+  if (tab === 'sesiones') {
+    content.innerHTML = `
+      <button onclick="abrirAgregarCliente()" class="btn btn-sm w-100 mb-3 rounded-3" style="background:var(--mm-cream-dark); color:var(--mm-text); font-size:.85rem; border:none; padding:.5rem;">
+        <i class="bi bi-person-plus me-1"></i> Agregar cliente a la mesa
+      </button>
+      ${(panelData.sesiones||[]).map(s => `
+        <div style="border:1px solid var(--mm-border); border-radius:var(--radius-sm); padding:.75rem; margin-bottom:.75rem;">
+          <div class="d-flex align-items-center justify-content-between mb-2">
+            <div class="d-flex gap-2 align-items-center">
+              <div style="width:32px;height:32px;border-radius:50%;background:var(--mm-green);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;">${s.alias[0].toUpperCase()}</div>
+              <div><div style="font-weight:600; font-size:.875rem;">${s.alias}</div>
+              <div style="font-size:.75rem; color:var(--mm-text-muted);">${s.pedidos.length} pedidos · $${s.total.toFixed(2)}</div></div>
+            </div>
+          </div>
+          <div class="d-flex gap-2">
+            <button class="btn btn-sm flex-grow-1 rounded-3" style="background:var(--mm-green);color:#fff;font-size:.78rem;border:none;" onclick="abrirAsistido(${s.id},'${s.alias}')">
+              <i class="bi bi-plus-circle me-1"></i>+ Agregar pedido
+            </button>
+            <button class="btn btn-sm rounded-3" style="background:var(--mm-cream-dark);color:var(--mm-danger);font-size:.78rem;border:none;" onclick="cerrarSesion(${s.id},'${s.alias}')">
+              <i class="bi bi-x-circle me-1"></i> Cerrar
+            </button>
+          </div>
+        </div>`).join('')}`;
+  }
+  if (tab === 'pedidos') {
+    const todos = (panelData.sesiones||[]).flatMap(s => s.pedidos.map(p => ({ ...p, alias: s.alias })));
+    content.innerHTML = todos.length ? todos.map(p => `
+      <div style="border:1px solid var(--mm-border); border-radius:var(--radius-sm); padding:.75rem; margin-bottom:.75rem;">
+        <div class="d-flex align-items-center justify-content-between mb-1">
+          <span style="font-weight:600; font-size:.875rem;">#${p.id} · ${p.alias} · ${p.fecha}</span>
+          <span style="background:${statusBg[p.estado]||'#f5f5f5'};color:${statusColors[p.estado]||'#333'};border-radius:99px;padding:.2rem .6rem;font-size:.7rem;font-weight:700;">${p.estado_display}</span>
+        </div>
+        ${p.items.map(i => `<div style="font-size:.8rem;color:var(--mm-text-muted);">${i.cantidad}× ${i.nombre} <span style="float:right;">$${i.subtotal.toFixed(2)}</span>${i.notas?`<div style="color:var(--mm-danger);font-size:.72rem;"><i class="bi bi-exclamation-triangle-fill me-1"></i>${i.notas}</div>`:''}</div>`).join('')}
+        <div class="d-flex gap-2 mt-2">
+          ${p.estado==='listo'?`<button class="btn btn-sm flex-grow-1 rounded-3" style="background:var(--mm-green);color:#fff;font-size:.78rem;border:none;" onclick="entregarPedido(${p.id})"><i class="bi bi-check2 me-1"></i>Marcar entregado</button>`:''}
+          ${!['entregado','cancelado'].includes(p.estado)?`<button class="btn btn-sm rounded-3" style="background:#FDEDEC;color:var(--mm-danger);font-size:.78rem;border:none;" onclick="abrirCancelar(${p.id})"><i class="bi bi-x-circle me-1"></i>Cancelar</button>`:''}
+        </div>
+      </div>`).join('') : '<div style="text-align:center;padding:2rem;color:var(--mm-text-muted);"><i class="bi bi-clipboard" style="font-size:2rem;"></i><p style="font-size:.85rem;margin-top:.5rem;">Sin pedidos</p></div>';
+  }
+  if (tab === 'solicitudes') {
+    content.innerHTML = (panelData.solicitudes||[]).length ?
+      panelData.solicitudes.map(s => `
+        <div style="border:2px solid var(--mm-green);background:var(--mm-green-pale);border-radius:var(--radius-sm);padding:.75rem;margin-bottom:.75rem;">
+          <div class="d-flex justify-content-between mb-1">
+            <div>
+              <div style="font-weight:600;font-size:.875rem;">Solicitud de cuenta
+                ${s.metodo_pref ? `<span style="font-size:.7rem;background:#e8f5e9;color:#2e7d32;border-radius:99px;padding:.15rem .5rem;margin-left:.4rem;font-weight:600;">${s.metodo_pref}</span>` : ''}
+              </div>
+              <div style="font-size:.75rem;color:var(--mm-text-muted);">${s.alias} · ${s.tipo_display} · ${s.fecha}</div>
+            </div>
+            <span style="font-weight:700;color:var(--mm-green);">$${s.total.toFixed(2)}</span>
+          </div>
+          <div class="d-flex gap-2 mt-2">
+            <button class="btn btn-primary btn-sm flex-grow-1 rounded-3" onclick="abrirPago(${panelData.mesa_id},${s.total},${s.sesion_id||'null'},'${s.metodo_pref||''}')">
+              <i class="bi bi-cash-coin me-1"></i>Procesar pago
+            </button>
+            <button class="btn btn-sm rounded-3" style="background:#FDEDEC;color:var(--mm-danger);border:none;white-space:nowrap;" onclick="confirmarCancelarSolicitud(${s.id})">
+              <i class="bi bi-x-circle me-1"></i>Cancelar
+            </button>
+          </div>
+        </div>`).join('') :
+      '<div style="text-align:center;padding:2rem;color:var(--mm-text-muted);"><i class="bi bi-bell" style="font-size:2rem;"></i><p style="font-size:.85rem;margin-top:.5rem;">Sin solicitudes</p></div>';
+  }
+  if (tab === 'resumen') {
+    content.innerHTML = `
+      <div style="background:var(--mm-green-pale);border-radius:var(--radius-sm);padding:1rem;text-align:center;margin-bottom:1rem;">
+        <div style="font-size:.8rem;color:var(--mm-text-muted);">Total consumido</div>
+        <div style="font-size:1.75rem;font-weight:700;color:var(--mm-green);">$${(panelData.total_mesa||0).toFixed(2)}</div>
+      </div>
+      <div style="font-size:.85rem;color:var(--mm-text-muted);">
+        <div class="d-flex justify-content-between py-1" style="border-bottom:1px solid var(--mm-border);">
+          <span>Sesiones activas</span><span>${(panelData.sesiones||[]).length}</span>
+        </div>
+        <div class="d-flex justify-content-between py-1">
+          <span>Total pedidos</span><span>${(panelData.sesiones||[]).reduce((a,s)=>a+s.pedidos.length,0)}</span>
+        </div>
+      </div>`;
+  }
+}
+
+// cerrarSesion — solicita confirmación y cierra la sesión de un cliente específico
+async function cerrarSesion(sid, alias) {
+  if (!await confirmarAccion(`¿Cerrar sesión de ${alias}?`)) return;
+  const res = await fetch('/mesero/sesion/cerrar/', { method:'POST', headers:{'Content-Type':'application/json','X-CSRFToken':CSRF}, body: JSON.stringify({sesion_id:sid}) });
+  const d = await res.json();
+  if (d.ok) { showToast('Sesión cerrada', 'success'); selectMesa(currentMesaId, null, true); }
+}
+
+// cerrarMesa — cierra todas las sesiones activas de la mesa y oculta el panel
+async function cerrarMesa() {
+  if (!await confirmarAccion('¿Cerrar esta mesa? Todas las sesiones activas se cerrarán.')) return;
+  const res = await fetch('/mesero/mesa/cerrar/', { method:'POST', headers:{'Content-Type':'application/json','X-CSRFToken':CSRF}, body: JSON.stringify({mesa_id:currentMesaId}) });
+  const d = await res.json();
+  if (d.ok) { showToast('Mesa cerrada', 'success'); closePanel(); pollMesas(); }
+}
+
+// entregarPedido — marca un pedido como entregado (estado "listo" → "entregado")
+async function entregarPedido(id) {
+  const res = await fetch('/mesero/pedidos/entregar/', { method:'POST', headers:{'Content-Type':'application/json','X-CSRFToken':CSRF}, body: JSON.stringify({pedido_id:id}) });
+  const d = await res.json();
+  if (d.ok) { showToast('Pedido entregado', 'success'); selectMesa(currentMesaId, null, true); }
+}
+
+// abrirCancelar — abre el modal de cancelación precargando el ID del pedido
+function abrirCancelar(id) {
+  document.getElementById('cancelarPedidoId').value = id;
+  document.getElementById('cancelarMotivo').value = '';
+  new bootstrap.Modal(document.getElementById('cancelarModal')).show();
+}
+
+// confirmarCancelacion — envía la cancelación con motivo al endpoint gerente:cancelar_pedido
+async function confirmarCancelacion() {
+  const id = document.getElementById('cancelarPedidoId').value;
+  const motivo = document.getElementById('cancelarMotivo').value.trim();
+  if (!motivo) { document.getElementById('cancelarMotivo').style.borderColor = 'var(--mm-danger)'; return; }
+  const res = await fetch('{% url "gerente:cancelar_pedido" %}', { method:'POST', headers:{'Content-Type':'application/json','X-CSRFToken':CSRF}, body: JSON.stringify({pedido_id:id, motivo}) });
+  const d = await res.json();
+  if (d.ok) { bootstrap.Modal.getInstance(document.getElementById('cancelarModal')).hide(); showToast('Pedido cancelado', 'success'); selectMesa(currentMesaId, null, true); }
+}
+
+// Variables de estado del modal de pago
+let _pagoSubtotal = 0;  // Subtotal de la mesa/sesión a cobrar
+let _pagoPropina  = 0;  // Propina aplicada (monto absoluto)
+let _pagoModo     = 'EFECTIVO'; // Método activo: EFECTIVO | TARJETA | MIXTO
+
+// Catálogo de métodos de pago disponibles (sincronizado con el modelo MetodoPago)
+const PAGO_METODOS = [
+  {id:1, nombre:'Efectivo', icon:'<i class="bi bi-cash"></i>', desc:'EFECTIVO'},
+  {id:2, nombre:'Tarjeta',  icon:'<i class="bi bi-credit-card"></i>', desc:'TARJETA'},
+  {id:3, nombre:'Mixto',    icon:'<i class="bi bi-shuffle"></i>', desc:'MIXTO'},
+];
+
+// abrirPago — inicializa y muestra el modal de pago.
+//   mesaId     → mesa que se cobra
+//   total      → importe a pagar (sin propina)
+//   sesionId   → null = toda la mesa; número = cobro individual
+//   metodoPref → método preferido del cliente (pre-selecciona el radio)
+function abrirPago(mesaId, total, sesionId=null, metodoPref='') {
+  _pagoSubtotal = parseFloat(total) || 0;
+  _pagoPropina  = 0;
+
+  document.getElementById('pagoMesaId').value  = mesaId;
+  document.getElementById('pagoSesionId').value = sesionId || '';
+  document.getElementById('pagoSubtitle').textContent = sesionId ? 'Cobro individual' : 'Toda la mesa';
+
+  // Resetear campos
+  document.getElementById('pagoPropinaInput').value  = '';
+  document.getElementById('pagoPropinaHidden').value = '0';
+  document.getElementById('montoRecibido').value     = '';
+  document.getElementById('pagoEfectivo').value      = '';
+  document.getElementById('pagoTarjeta').value       = '';
+  document.getElementById('pagoMontoRecibido').value = '';
+  document.getElementById('pagoMontoEfectivo').value = '';
+  document.getElementById('pagoMontoTarjeta').value  = '';
+
+  // Pre-seleccionar método según preferencia del cliente
+  const pref = (metodoPref || '').toUpperCase();
+  const prefMetodo = pref ? PAGO_METODOS.find(m => m.desc === pref) : null;
+  const selected = prefMetodo || PAGO_METODOS[0];
+  _pagoModo = selected.desc;
+
+  actualizarTotalesModal();
+
+  // Renderizar métodos
+  document.getElementById('metodosContainer').innerHTML = PAGO_METODOS.map(m=>`
+    <label style="display:flex;align-items:center;gap:.75rem;padding:.75rem 1rem;border:1.5px solid ${m.id===selected.id?'var(--mm-green)':'var(--mm-border)'};border-radius:var(--radius-sm);margin-bottom:.4rem;cursor:pointer;background:${m.id===selected.id?'var(--mm-green-pale)':'transparent'};"
+           class="metodo-opt" onclick="selMetodo(${m.id},'${m.desc}',this)">
+      <input type="radio" value="${m.id}" ${m.id===selected.id?'checked':''} style="display:none;">
+      <span>${m.icon}</span><span style="font-weight:600;">${m.nombre}</span>
+    </label>`).join('');
+
+  document.getElementById('pagoMetodoId').value = selected.id;
+  aplicarModoModal(selected.desc);
+
+  const btn = document.getElementById('pagoSubmitBtn');
+  btn.disabled = false;
+  document.getElementById('montoError').style.display   = 'none';
+  document.getElementById('cambioDisplay').style.display = 'none';
+
+  new bootstrap.Modal(document.getElementById('pagoModal')).show();
+}
+
+// actualizarTotalesModal — recalcula y refleja en el DOM subtotal, propina y total
+//   Llama a calcCambio() o calcMixtoModal() según el método activo
+function actualizarTotalesModal() {
+  const total = _pagoSubtotal + _pagoPropina;
+  document.getElementById('pagoSubtotalDisp').textContent = '$' + _pagoSubtotal.toFixed(2);
+  document.getElementById('pagoPropinaDisp').textContent  = '$' + _pagoPropina.toFixed(2);
+  document.getElementById('pagoPropinaRow').style.display = _pagoPropina > 0 ? 'flex' : 'none';
+  document.getElementById('pagoTotal').textContent        = '$' + total.toFixed(2);
+  document.getElementById('pagoBtnTotal').textContent     = '$' + total.toFixed(2);
+  if (_pagoModo === 'EFECTIVO') calcCambio();
+  if (_pagoModo === 'MIXTO')    calcMixtoModal();
+}
+
+// updatePagoPropina — actualiza _pagoPropina y sincroniza el campo hidden del formulario
+function updatePagoPropina(val) {
+  _pagoPropina = Math.max(0, isNaN(val) ? 0 : val);
+  document.getElementById('pagoPropinaHidden').value = _pagoPropina.toFixed(2);
+  actualizarTotalesModal();
+}
+// setPagoPropinaP — calcula propina como porcentaje del subtotal y la aplica
+function setPagoPropinaP(pct) {
+  const val = Math.round(_pagoSubtotal * pct) / 100;
+  document.getElementById('pagoPropinaInput').value = val.toFixed(2);
+  updatePagoPropina(val);
+}
+// setPagoPropina — aplica un monto fijo de propina (0 = sin propina)
+function setPagoPropina(val) {
+  document.getElementById('pagoPropinaInput').value = val > 0 ? val.toFixed(2) : '';
+  updatePagoPropina(val);
+}
+
+// selMetodo — marca visualmente el método de pago elegido y adapta las secciones visibles
+function selMetodo(id, desc, el) {
+  document.getElementById('pagoMetodoId').value = id;
+  _pagoModo = desc;
+  document.querySelectorAll('#pagoModal .metodo-opt').forEach(o=>{
+    o.style.borderColor='var(--mm-border)'; o.style.background='transparent';
+  });
+  el.style.borderColor='var(--mm-green)'; el.style.background='var(--mm-green-pale)';
+  aplicarModoModal(desc);
+}
+
+// aplicarModoModal — muestra u oculta las secciones de efectivo y mixto según el método
+function aplicarModoModal(desc) {
+  const isMixto    = desc === 'MIXTO';
+  const isEfectivo = desc === 'EFECTIVO';
+  document.getElementById('pagoEfectivoSec').style.display = isEfectivo ? 'block' : 'none';
+  document.getElementById('pagoMixtoSec').style.display    = isMixto   ? 'block' : 'none';
+  document.getElementById('montoError').style.display      = 'none';
+  document.getElementById('cambioDisplay').style.display   = 'none';
+}
+
+// calcCambio — valida el monto recibido en efectivo y muestra el cambio a devolver
+function calcCambio() {
+  const total  = _pagoSubtotal + _pagoPropina;
+  const monto  = parseFloat(document.getElementById('montoRecibido').value) || 0;
+  const cambio = document.getElementById('cambioDisplay');
+  const err    = document.getElementById('montoError');
+  document.getElementById('pagoMontoRecibido').value = monto > 0 ? monto.toFixed(2) : '';
+  if (monto > 0 && monto < total) {
+    cambio.style.display = 'none';
+    err.innerHTML = `<i class="bi bi-exclamation-triangle-fill me-1"></i>Faltan $${(total - monto).toFixed(2)} para cubrir el total`;
+    err.style.display = 'block';
+  } else if (monto >= total && total > 0) {
+    cambio.style.display = 'block';
+    cambio.innerHTML   = `<i class="bi bi-cash-coin me-1"></i>Cambio: $${(monto - total).toFixed(2)}`;
+    err.style.display    = 'none';
+  } else {
+    cambio.style.display = 'none';
+    err.style.display    = 'none';
+  }
+}
+
+// calcMixtoModal — valida que la suma efectivo+tarjeta cubra el total en modo mixto
+function calcMixtoModal() {
+  const total  = _pagoSubtotal + _pagoPropina;
+  const ef     = parseFloat(document.getElementById('pagoEfectivo').value) || 0;
+  const ta     = parseFloat(document.getElementById('pagoTarjeta').value)  || 0;
+  const info   = document.getElementById('mixtoModalInfo');
+  document.getElementById('pagoMontoEfectivo').value = ef > 0 ? ef.toFixed(2) : '';
+  document.getElementById('pagoMontoTarjeta').value  = ta > 0 ? ta.toFixed(2) : '';
+  if (ef <= 0 && ta <= 0) { info.style.display = 'none'; return; }
+  if (ef + ta < total) {
+    info.innerHTML        = `<i class="bi bi-exclamation-triangle-fill me-1"></i>Faltan $${(total - ef - ta).toFixed(2)}`;
+    info.style.color        = '#721c24';
+    info.style.background   = '#FDEDEC';
+  } else {
+    info.innerHTML        = `<i class="bi bi-check-circle-fill me-1"></i>Correcto — $${(ef + ta).toFixed(2)}`;
+    info.style.color        = 'var(--mm-green)';
+    info.style.background   = 'var(--mm-green-pale)';
+  }
+  info.style.display = 'block';
+}
+
+// abrirAsistido — abre el modal de pedido asistido para una sesión y alias dados
+function abrirAsistido(sesionId, alias) {
+  asistidoSesionId = sesionId; asistidoCart = [];
+  document.getElementById('asistidoTitle').textContent = `Pedido asistido · ${alias}`;
+  document.getElementById('asistidoSubtitle').textContent = `Mesa ${panelData?.numero_mesa}`;
+  document.getElementById('asistidoCartSummary').style.display = 'none';
+  document.getElementById('btnConfirmarAsistido').disabled = true;
+  // Fetch products
+  fetch('/gerente/menu/productos/?format=json').then(r => r.text()).then(() => {
+    document.getElementById('asistidoProductsContainer').innerHTML = '<p style="color:var(--mm-text-muted); font-size:.875rem;">Carga el menú desde Gestión de Menú para usar pedido asistido aquí.</p>';
+  });
+  new bootstrap.Modal(document.getElementById('asistidoModal')).show();
+}
+
+// confirmarAsistido — envía los ítems del carrito al endpoint mesero:asistido/confirmar
+async function confirmarAsistido() {
+  if (!asistidoSesionId || !asistidoCart.length) return;
+  const res = await fetch('/mesero/asistido/confirmar/', { method:'POST', headers:{'Content-Type':'application/json','X-CSRFToken':CSRF}, body: JSON.stringify({sesion_id:asistidoSesionId, items:asistidoCart}) });
+  const d = await res.json();
+  if (d.ok) { bootstrap.Modal.getInstance(document.getElementById('asistidoModal')).hide(); showToast('Pedido enviado', 'success'); selectMesa(currentMesaId, null, true); }
+}
+
+// abrirAgregarCliente — stub: la alta de clientes se gestiona en el módulo mesero
+function abrirAgregarCliente() { showToast('Función disponible en el módulo mesero', ''); }
+
+// ── Validación y reset del modal de pago ─────────────────────────────────────
+// Antes de enviar el formulario: verifica montos suficientes según el modo activo;
+// bloquea el botón para evitar doble envío y muestra spinner.
+document.getElementById('pagoForm').addEventListener('submit', function(e) {
+  const total = _pagoSubtotal + _pagoPropina;
+  const err   = document.getElementById('montoError');
+
+  if (_pagoModo === 'EFECTIVO') {
+    const monto = parseFloat(document.getElementById('montoRecibido').value) || 0;
+    document.getElementById('pagoMontoRecibido').value = monto > 0 ? monto.toFixed(2) : '';
+    if (monto > 0 && monto < total) {
+      e.preventDefault();
+      err.innerHTML   = `<i class="bi bi-exclamation-triangle-fill me-1"></i>Monto insuficiente. Faltan $${(total - monto).toFixed(2)} para completar el pago.`;
+      err.style.display = 'block';
+      document.getElementById('montoRecibido').focus();
+      return;
+    }
+  }
+
+  if (_pagoModo === 'MIXTO') {
+    const ef = parseFloat(document.getElementById('pagoEfectivo').value) || 0;
+    const ta = parseFloat(document.getElementById('pagoTarjeta').value)  || 0;
+    document.getElementById('pagoMontoEfectivo').value = ef > 0 ? ef.toFixed(2) : '';
+    document.getElementById('pagoMontoTarjeta').value  = ta > 0 ? ta.toFixed(2) : '';
+    if (ef + ta < total) {
+      e.preventDefault();
+      err.innerHTML   = `<i class="bi bi-exclamation-triangle-fill me-1"></i>Monto insuficiente en pago mixto. Faltan $${(total - ef - ta).toFixed(2)}.`;
+      err.style.display = 'block';
+      return;
+    }
+  }
+
+  const btn = document.getElementById('pagoSubmitBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Procesando…';
+});
+
+// Al cerrar el modal de pago: restaura el botón de confirmar y oculta mensajes de error
+document.getElementById('pagoModal').addEventListener('hidden.bs.modal', () => {
+  const btn = document.getElementById('pagoSubmitBtn');
+  btn.disabled = false;
+  btn.innerHTML = 'Confirmar pago — <span id="pagoBtnTotal">$0.00</span>';
+  document.getElementById('montoError').style.display    = 'none';
+  document.getElementById('cambioDisplay').style.display = 'none';
+  document.getElementById('mixtoModalInfo').style.display = 'none';
+});
+
+// ─── Cancelar solicitud de pago (gerente) ─────────────────────────────────────
+let _solicitudIdACancelar = null; // ID de la solicitud pendiente de cancelar
+
+// confirmarCancelarSolicitud — muestra el modal de confirmación guardando el ID de la solicitud
+function confirmarCancelarSolicitud(id) {
+  _solicitudIdACancelar = id;
+  new bootstrap.Modal(document.getElementById('modalCancelarSolicitudGte')).show();
+}
+
+// ejecutarCancelarSolicitud — llama al endpoint gerente:cancelar_solicitud_pago y refresca el panel
+async function ejecutarCancelarSolicitud() {
+  if (!_solicitudIdACancelar) return;
+  const modal = bootstrap.Modal.getInstance(document.getElementById('modalCancelarSolicitudGte'));
+  try {
+    const res = await fetch('{% url "gerente:cancelar_solicitud_pago" %}', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'X-CSRFToken': CSRF},
+      body: JSON.stringify({solicitud_id: _solicitudIdACancelar}),
+    });
+    const d = await res.json();
+    modal && modal.hide();
+    showToast(d.ok ? (d.mensaje || 'Solicitud cancelada') : (d.error || 'Error'), d.ok ? 'success' : 'error');
+    if (d.ok && currentMesaId) setTimeout(() => selectMesa(currentMesaId), 400);
+  } catch(e) { showToast('Error de red', 'error'); }
+  _solicitudIdACancelar = null;
+}
+
+// confirmarAccion — reemplaza confirm() nativo con el modal Bootstrap #modalConfirmarAccion.
+//   Devuelve una Promise<boolean> resuelta cuando el usuario acepta o cierra el modal.
+function confirmarAccion(mensaje) {
+  return new Promise(resolve => {
+    document.getElementById('confirmarAccionMsg').textContent = mensaje;
+    const el = document.getElementById('modalConfirmarAccion');
+    const m = new bootstrap.Modal(el);
+    el.addEventListener('hidden.bs.modal', () => resolve(false), {once: true});
+    document.getElementById('btnConfirmarAccionOk').onclick = () => { m.hide(); resolve(true); };
+    m.show();
+  });
+}
+</script>
+{% endblock %}

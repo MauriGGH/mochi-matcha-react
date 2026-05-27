@@ -1,0 +1,235 @@
+{# ============================================================================= #}
+{# cliente_base.html — Plantilla base para la app del cliente final.            #}
+{# Provee el shell de ancho máximo 430 px (formato móvil), el header sticky,   #}
+{# el nav inferior fijo con 4 destinos, el sistema de toasts y los JS globales. #}
+{# Todas las vistas de cliente extienden esta plantilla.                        #}
+{# ============================================================================= #}
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  {# viewport-fit=cover + user-scalable=no: experiencia PWA sin zoom accidental #}
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#3D6B4F">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  {# Bloque title: cada vista sobreescribe el título de la pestaña #}
+  <title>{% block title %}Mochi Matcha{% endblock %}</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500;600&family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+  {% load static %}
+  {# Tokens de diseño globales + estilos específicos de la app de cliente #}
+  <link href="{% static 'css/mochi.css' %}" rel="stylesheet">
+  <link href="{% static 'css/cliente.css' %}" rel="stylesheet">
+  {# ── Estilos inline: shell, nav fijo y toasts ── #}
+  <style>
+    html, body { height: 100%; }
+    body {
+      background: #2A4A36;
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+    }
+    :root {
+      --client-nav-h: calc(72px + env(safe-area-inset-bottom, 0px));
+    }
+    #client-shell {
+      width: 100%;
+      max-width: 430px;
+      min-height: 100vh;
+      min-height: 100svh;
+      background: var(--mm-cream);
+      display: flex;
+      flex-direction: column;
+      position: relative;
+    }
+    #client-content {
+      flex: 1;
+      /* Reserva el alto del nav fijo para que el contenido scrollee completo */
+      padding-bottom: calc(var(--client-nav-h) + 8px);
+    }
+    /* Bottom nav anclado al viewport visible: nunca queda fuera de pantalla */
+    .client-bottom-nav {
+      position: fixed;
+      bottom: 0;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 100%;
+      max-width: 430px;
+      z-index: 100;
+    }
+    /* Toast styles */
+    .mm-toast-container { position: fixed; bottom: calc(80px + env(safe-area-inset-bottom, 0px)); left: 50%; transform: translateX(-50%); z-index: 9999; display: flex; flex-direction: column; gap: .5rem; align-items: center; pointer-events: none; }
+    .mm-toast { background: #1C2A1E; color: #fff; border-radius: var(--radius-pill); padding: .6rem 1.25rem; font-size: .875rem; font-weight: 500; box-shadow: var(--shadow-lg); opacity: 1; transition: opacity .3s; white-space: nowrap; }
+    .mm-toast.success { background: var(--mm-success); }
+    .mm-toast.error   { background: var(--mm-danger); }
+  </style>
+  {# Bloque para CSS/meta adicionales específicos de cada vista #}
+  {% block extra_head %}{% endblock %}
+</head>
+<body>
+
+{# ── Shell principal: contenedor centrado de 430 px con fondo crema ── #}
+<div id="client-shell">
+
+  {# ── Header sticky: logo + alias del cliente activo ── #}
+  {% block client_header %}
+  <header class="px-3 py-3 d-flex align-items-center justify-content-between"
+          style="background:var(--mm-white); border-bottom:1px solid var(--mm-border); position:sticky; top:0; z-index:50;">
+    <span class="fw-semibold" style="font-size:1rem; color:var(--mm-green); font-family:var(--font-display);"><i class="bi bi-cup-hot-fill me-1"></i>Mochi Matcha</span>
+    <div class="d-flex align-items-center gap-2">
+      {# Muestra el alias del cliente si hay sesión activa en la cookie #}
+      {% if request.sesion_cliente %}
+      <span class="badge rounded-pill" style="background:var(--mm-green-pale); color:var(--mm-green); font-size:.75rem;">
+        <i class="bi bi-person-fill me-1"></i>{{ request.sesion_cliente.alias }}
+      </span>
+      {% endif %}
+      {# Bloque para acciones adicionales en la derecha del header #}
+      {% block header_right %}{% endblock %}
+    </div>
+  </header>
+  {% endblock %}
+
+  {# ── Área de contenido principal: padding-bottom reserva espacio para el nav fijo ── #}
+  <main id="client-content">
+    {# Mensajes flash de Django (errores, confirmaciones de formulario) #}
+    {% if messages %}
+    <div class="px-3 pt-2">
+      {% for msg in messages %}
+      <div class="alert alert-{{ msg.tags }} alert-dismissible fade show rounded-3 py-2 px-3" role="alert" style="font-size:.875rem;">
+        {{ msg }}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+    {# Bloque principal — cada vista inyecta su contenido aquí #}
+    {% block content %}{% endblock %}
+  </main>
+
+  {# ── Navegación inferior fija: Menú / Carrito / Pedidos / Ayuda ── #}
+  {# Solo se muestra cuando existe una sesión de cliente (mesa escaneada) #}
+  {% block bottom_nav %}
+  {% if request.sesion_cliente %}
+  <nav class="client-bottom-nav">
+    {# Tab Menú: activo si la URL actual es 'menu' #}
+    <a href="{% url 'cliente:menu' %}"
+       class="nav-item {% if request.resolver_match.url_name == 'menu' %}active{% endif %}">
+      <i class="bi bi-grid-fill"></i>
+      <span>Menú</span>
+    </a>
+    {# Tab Carrito: muestra badge con el contador de ítems #}
+    <a href="{% url 'cliente:carrito' %}"
+       class="nav-item {% if request.resolver_match.url_name == 'carrito' %}active{% endif %}">
+      <i class="bi bi-bag-fill"></i>
+      <span>Carrito</span>
+      {% if request.carrito_count > 0 %}
+      <span class="nav-badge">{{ request.carrito_count }}</span>
+      {% endif %}
+    </a>
+    {# Tab Pedidos: historial de pedidos enviados #}
+    <a href="{% url 'cliente:pedidos' %}"
+       class="nav-item {% if request.resolver_match.url_name == 'pedidos' %}active{% endif %}">
+      <i class="bi bi-receipt"></i>
+      <span>Pedidos</span>
+    </a>
+    {# Tab Ayuda: llama a solicitarAyudaGlobal() en lugar de navegar #}
+    <a href="{% url 'cliente:pedidos' %}"
+       class="nav-item" onclick="solicitarAyudaGlobal(event)">
+      <i class="bi bi-bell-fill"></i>
+      <span>Ayuda</span>
+    </a>
+  </nav>
+  {% endif %}
+  {% endblock %}
+
+</div>
+
+{# ── Contenedor de toasts flotantes (posicionado sobre el nav) ── #}
+<div class="mm-toast-container" id="toastContainer"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+// Muestra una notificación toast efímera (3 s) de tipo 'success' o 'error'.
+// Usada por todas las vistas hijas vía la herencia de plantilla.
+function showToast(msg, type='') {
+  const c = document.getElementById('toastContainer');
+  const t = document.createElement('div');
+  t.className = `mm-toast ${type}`;
+  t.textContent = msg;
+  c.appendChild(t);
+  setTimeout(() => { t.style.opacity='0'; setTimeout(()=>t.remove(), 300); }, 3000);
+}
+// Mantiene el bottom nav pegado al borde inferior visible del navegador,
+// incluso cuando el teclado virtual reduce el viewport en iOS/Android.
+(function () {
+  if (!window.visualViewport) return;
+  var nav = document.querySelector('.client-bottom-nav');
+  if (!nav) return;
+  function syncNav() {
+    var vv = window.visualViewport;
+    var offset = (window.innerHeight - vv.height - vv.offsetTop);
+    nav.style.bottom = Math.max(0, offset) + 'px';
+  }
+  window.visualViewport.addEventListener('resize', syncNav);
+  window.visualViewport.addEventListener('scroll', syncNav);
+  syncNav();
+})();
+
+// Lee el token CSRF de la cookie para peticiones fetch con método POST.
+function getCsrf() {
+  return document.cookie.split(';').find(c=>c.trim().startsWith('csrftoken='))?.split('=')[1] || '';
+}
+
+// Envía una solicitud de ayuda al mesero desde el botón global del nav inferior.
+// Intercepta el evento para no navegar a la URL de pedidos.
+// 2.3: respeta el mensaje del rate-limit (429) en lugar de mostrar un éxito falso.
+async function solicitarAyudaGlobal(e) {
+  e.preventDefault();
+  try {
+    const res = await fetch('{% url "cliente:solicitar_ayuda" %}', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrf() },
+      body: '{}'
+    });
+    const data = await res.json().catch(() => ({}));
+    if (data.ok) {
+      showToast('Mesero notificado', 'success');
+    } else {
+      showToast(data.error || 'No se pudo notificar al mesero', 'error');
+    }
+  } catch(err) { showToast('Error al notificar', 'error'); }
+}
+
+// Delegación global de eventos de input:
+// 1) data-upper: convierte el texto a mayúsculas manteniendo la posición del cursor.
+// 2) maxlength: inserta un contador de caracteres dinámico debajo del campo.
+document.addEventListener('input', e => {
+  const el = e.target;
+
+  if (el.matches('[data-upper]')) {
+    const pos = el.selectionStart;
+    el.value = el.value.toUpperCase();
+    try { el.setSelectionRange(pos, pos); } catch (_) {}
+  }
+
+  if (el.matches('input[maxlength], textarea[maxlength]')) {
+    const max = parseInt(el.getAttribute('maxlength'));
+    if (!el._charCounter) {
+      const c = document.createElement('div');
+      c.style.cssText = 'font-size:.68rem;text-align:right;margin-top:.1rem;line-height:1;pointer-events:none;color:#aaa;';
+      el.insertAdjacentElement('afterend', c);
+      el._charCounter = c;
+    }
+    const len = el.value.length;
+    el._charCounter.textContent = `${len} / ${max}`;
+    // Cambia a rojo cuando quedan ≤ 8 % de caracteres (mínimo 5)
+    el._charCounter.style.color = (max - len) <= Math.max(5, Math.ceil(max * 0.08))
+      ? '#dc3545' : '#aaa';
+  }
+});
+</script>
+{# Bloque para scripts adicionales específicos de cada vista #}
+{% block extra_scripts %}{% endblock %}
+</body>
+</html>

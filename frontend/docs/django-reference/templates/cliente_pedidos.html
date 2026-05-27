@@ -1,0 +1,771 @@
+{# ============================================================================= #}
+{# pedidos.html — Vista de seguimiento de pedidos del cliente.                  #}
+{# Muestra las tarjetas de cada pedido con su stepper de estado (recibido →     #}
+{# preparando → listo), el total consumido, botones de pedir cuenta y llamar   #}
+{# al mesero, y dos modales: pedir cuenta (efectivo/tarjeta/PayPal) y           #}
+{# cuenta pagada (compartido por el cierre del mesero y por PayPal directo).   #}
+{# Polling doble cada 5 s: pollOrders (estado del pedido) y pollSesion          #}
+{# (detecta cuándo el mesero cerró la cuenta).                                  #}
+{# ============================================================================= #}
+{% extends "base/cliente_base.html" %}
+{% load static %}
+
+{% block title %}Mis pedidos — Mochi Matcha{% endblock %}
+
+{# ── Header: flecha de regreso al menú + número de mesa + PIN ── #}
+{% block client_header %}
+<header class="client-header px-3 py-3 d-flex align-items-center justify-content-between"
+        style="background:var(--mm-white); border-bottom:1px solid var(--mm-border); position:sticky; top:0; z-index:50;">
+  <div class="d-flex align-items-center gap-2">
+    <a href="{% url 'cliente:menu' %}" style="color:var(--mm-text); text-decoration:none;"><i class="bi bi-arrow-left fs-5"></i></a>
+    <span class="fw-bold" style="font-size:1rem;">Mis pedidos</span>
+  </div>
+  <span style="font-size:.8rem; color:var(--mm-text-muted);">Mesa {{ mesa.numero_mesa }} · <span class="fw-bold" style="font-family:var(--font-mono);">PIN: {{ pin_mesa }}</span></span>
+</header>
+{% endblock %}
+
+{% block content %}
+<div class="px-3 pt-3 pb-2">
+
+{% comment %}1.4: Banner persistente en modo solo-lectura tras pagar. La sesión queda
+   abierta hasta que el cliente decida salir; aquí siempre tiene la vía.{% endcomment %}
+{% if request.sesion_pagada %}
+<div id="paidBanner"
+     style="background:#EAFAF1; border:1px solid #2ECC71; color:#1E8449; border-radius:var(--radius-sm);
+            padding:.7rem .85rem; margin-bottom:.85rem; display:flex; align-items:center; gap:.6rem;">
+  <i class="bi bi-check-circle-fill" style="font-size:1.1rem;"></i>
+  <div style="flex:1; font-size:.82rem; line-height:1.25;">
+    <strong>Cuenta pagada.</strong> Puedes seguir viendo tus pedidos aquí.
+  </div>
+  <button class="btn btn-sm rounded-3 fw-semibold" style="background:#1E8449; color:#fff; font-size:.75rem;"
+          onclick="salirDeSesion()">
+    <i class="bi bi-box-arrow-right me-1"></i>Salir
+  </button>
+</div>
+{% endif %}
+
+{# ── Estado vacío: ningún pedido enviado en esta sesión ── #}
+{% if not pedidos %}
+<div class="text-center py-5">
+  <i class="bi bi-clipboard" style="font-size:3rem; color:var(--mm-border); margin-bottom:1rem; display:block;"></i>
+  <h6 class="fw-bold mb-1" style="color:var(--mm-text-muted);">Aún no tienes pedidos</h6>
+  <p style="font-size:.875rem; color:var(--mm-text-muted);">Explora el menú y haz tu primer pedido</p>
+  <a href="{% url 'cliente:menu' %}" class="btn btn-primary mt-2">Ver el menú</a>
+</div>
+{% else %}
+
+{# ── Lista de tarjetas de pedido: id="order-X" referenciado por el polling JS ── #}
+<div id="ordersList">
+{% for pedido in pedidos %}
+{# Cada tarjeta contiene: badge de estado, stepper de progreso, ítems y mensaje animado #}
+<div class="order-card mb-3" id="order-{{ pedido.pk }}">
+  <div class="d-flex align-items-center justify-content-between mb-2">
+    <span class="fw-bold" style="font-size:.875rem;">Pedido #{{ pedido.pk }}</span>
+    {# Badge de estado: clase dinámica para aplicar el color correcto via CSS #}
+    <span class="order-status-badge status-{{ pedido.estado }}">{{ pedido.get_estado_display }}</span>
+  </div>
+
+  {# ── Stepper de progreso: 3 dots (recibido / preparando / listo) y 2 líneas ── #}
+  <!-- Progress stepper -->
+  <div class="order-steps mb-2">
+    <div class="step-dot {% if pedido.estado != 'cancelado' %}{% if pedido.estado in 'preparando,listo,entregado' %}done{% elif pedido.estado == 'recibido' %}current{% endif %}{% endif %}">
+      <i class="bi bi-check" style="font-size:.6rem;"></i>
+    </div>
+    <div class="step-line {% if pedido.estado in 'preparando,listo,entregado' %}done{% endif %}"></div>
+    <div class="step-dot {% if pedido.estado in 'preparando,listo,entregado' %}{% if pedido.estado in 'listo,entregado' %}done{% elif pedido.estado == 'preparando' %}current{% endif %}{% endif %}">
+      <i class="bi bi-fire" style="font-size:.6rem;"></i>
+    </div>
+    <div class="step-line {% if pedido.estado in 'listo,entregado' %}done{% endif %}"></div>
+    <div class="step-dot {% if pedido.estado in 'listo,entregado' %}{% if pedido.estado == 'entregado' %}done{% else %}current{% endif %}{% endif %}">
+      <i class="bi bi-check" style="font-size:.6rem;"></i>
+    </div>
+  </div>
+  <div class="d-flex justify-content-between mb-2" style="font-size:.68rem; color:var(--mm-text-muted); padding: 0 2px;">
+    <span>Recibido</span><span>Preparando</span><span>Listo</span>
+  </div>
+
+  {# ── Ítems del pedido: cantidad × nombre y subtotal por línea ── #}
+  <!-- Items -->
+  <div class="mt-2">
+  {% for detalle in pedido.detalles.all %}
+  <div style="font-size:.85rem; padding:.25rem 0; border-bottom:1px solid var(--mm-border);" class="d-flex justify-content-between">
+    <span>{{ detalle.cantidad }}× {{ detalle.producto.nombre }}</span>
+    <span style="color:var(--mm-text-muted);">${{ detalle.subtotal_calculado|floatformat:2 }}</span>
+  </div>
+  {% endfor %}
+  </div>
+
+  {# Mensaje de estado animado: spinner naranja en preparación, check verde al listo ── #}
+  <!-- Animación preparando -->
+  {% if pedido.estado == 'preparando' %}
+  <div class="mt-2 d-flex align-items-center gap-2" style="font-size:.8rem; color:var(--mm-warning);">
+    <span class="spinner-grow spinner-grow-sm" role="status" style="width:.5rem; height:.5rem; background:var(--mm-warning);"></span>
+    En preparación…
+  </div>
+  {% elif pedido.estado == 'listo' %}
+  <div class="mt-2 d-flex align-items-center gap-2" style="font-size:.8rem; color:var(--mm-success);">
+    <i class="bi bi-check-circle-fill"></i> ¡Listo! Tu mesero lo llevará pronto
+  </div>
+  {% endif %}
+</div>
+{% endfor %}
+</div>
+
+{# ── Total general de consumo de la sesión + acciones de cuenta y ayuda ── #}
+<!-- Total general -->
+<div class="cart-total-bar mt-2 mb-4">
+  <div class="d-flex justify-content-between fw-bold">
+    <span>Total consumido</span>
+    <span style="color:var(--mm-green);">${{ total_general|floatformat:2 }}</span>
+  </div>
+</div>
+
+<!-- Solicitar cuenta -->
+{# 1.4: ocultar acciones que ya no aplican en modo solo lectura tras el cobro. #}
+{% if not request.sesion_pagada %}
+<button class="btn btn-primary w-100 py-3 mb-2" onclick="openBillModal()">
+  <i class="bi bi-receipt me-2"></i>Pedir la cuenta
+</button>
+<button class="btn w-100 py-2 mb-3" style="background:var(--mm-cream-dark);" onclick="solicitarAyuda()">
+  <i class="bi bi-bell me-2"></i>Llamar al mesero
+</button>
+{% endif %}
+
+{% endif %}
+</div>
+
+{# ── Modal: Pedir la cuenta ── #}
+{# Permite elegir quién paga (individual/grupal) y el método (efectivo/tarjeta/PayPal). #}
+{# Si se selecciona PayPal, el SDK se carga bajo demanda y se renderiza el botón. #}
+<!-- Modal: Pedir cuenta -->
+<div class="modal fade" id="billModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered" style="max-width:390px;">
+    <div class="modal-content rounded-4 border-0">
+      <div class="modal-body p-4">
+        <h5 class="fw-bold mb-1">Pedir la cuenta</h5>
+        <p style="font-size:.875rem; color:var(--mm-text-muted); margin-bottom:1.25rem;">Elige quién paga y cómo</p>
+
+        {# Selector de quién paga: radio cards "Solo yo" / "Toda la mesa" #}
+        <!-- Quién paga -->
+        <p class="fw-semibold mb-2" style="font-size:.78rem; text-transform:uppercase; letter-spacing:.06em; color:var(--mm-text-muted);">Quién paga</p>
+        <div class="row g-2 mb-3">
+          <div class="col-6">
+            <label class="option-card d-block text-center" style="cursor:pointer;">
+              <input type="radio" name="tipoCobro" value="individual" class="d-none" checked>
+              <i class="bi bi-person-fill" style="font-size:1.5rem; color:var(--mm-green);"></i>
+              <div class="fw-bold mt-1" style="font-size:.83rem;">Solo yo</div>
+              <div style="font-size:.72rem; color:var(--mm-text-muted);">Mi consumo</div>
+            </label>
+          </div>
+          <div class="col-6">
+            <label class="option-card d-block text-center" style="cursor:pointer;">
+              <input type="radio" name="tipoCobro" value="grupal" class="d-none">
+              <i class="bi bi-people-fill" style="font-size:1.5rem; color:var(--mm-green);"></i>
+              <div class="fw-bold mt-1" style="font-size:.83rem;">Toda la mesa</div>
+              <div style="font-size:.72rem; color:var(--mm-text-muted);">Pago grupal</div>
+            </label>
+          </div>
+        </div>
+
+        {# Selector de método de pago: efectivo, tarjeta y PayPal (si hay client-id configurado) #}
+        <!-- Cómo pagar -->
+        <p class="fw-semibold mb-2" style="font-size:.78rem; text-transform:uppercase; letter-spacing:.06em; color:var(--mm-text-muted);">Cómo pagar</p>
+        <div class="d-flex gap-2 mb-3">
+          <button type="button" class="metodo-cli-btn" data-metodo="EFECTIVO" onclick="selMetodoCuenta('EFECTIVO',this)" style="flex:1; padding:.6rem .4rem; font-size:.8rem; font-weight:600; border-radius:var(--radius-sm); border:2px solid var(--mm-border); background:var(--mm-cream-dark); cursor:pointer;"><i class="bi bi-cash me-1"></i>Efectivo</button>
+          <button type="button" class="metodo-cli-btn" data-metodo="TARJETA"  onclick="selMetodoCuenta('TARJETA',this)"  style="flex:1; padding:.6rem .4rem; font-size:.8rem; font-weight:600; border-radius:var(--radius-sm); border:2px solid var(--mm-border); background:var(--mm-cream-dark); cursor:pointer;"><i class="bi bi-credit-card me-1"></i>Tarjeta</button>
+          {% if paypal_client_id %}
+          <button type="button" class="metodo-cli-btn" data-metodo="PAYPAL"   onclick="selMetodoCuenta('PAYPAL',this)"   style="flex:1; padding:.6rem .4rem; font-size:.8rem; font-weight:600; border-radius:var(--radius-sm); border:2px solid var(--mm-border); background:var(--mm-cream-dark); cursor:pointer;"><i class="bi bi-paypal me-1"></i>PayPal</button>
+          {% endif %}
+        </div>
+
+        {# Panel de acción mesero: visible cuando el método no es PayPal #}
+        <!-- Acción: mesero -->
+        <div id="accionMesero">
+          <button id="btnNotificarMesero" class="btn btn-primary w-100 py-3 fw-bold" onclick="confirmarCuenta()">
+            <i class="bi bi-bell me-2"></i>Notificar al mesero
+          </button>
+          <p style="font-size:.75rem; color:var(--mm-text-muted); text-align:center; margin-top:.4rem; margin-bottom:0;">El mesero se acercará a cobrar</p>
+        </div>
+
+        {% comment %}Panel PayPal: campo de propina + botón único que redirige a PayPal en la
+           MISMA pestaña (fix 1.7). El total cobrado incluye la propina (fix 1.6).{% endcomment %}
+        <!-- Acción: PayPal -->
+        <div id="accionPaypal" style="display:none;">
+          {# Propina opcional para PayPal — paridad con efectivo/tarjeta (fix 1.6) #}
+          <p class="fw-semibold mb-2" style="font-size:.78rem; text-transform:uppercase; letter-spacing:.06em; color:var(--mm-text-muted);">
+            Propina (opcional)
+          </p>
+          <div class="d-flex gap-2 mb-2" id="paypalPropinaPresets">
+            <button type="button" class="propina-cli-btn" data-pct="0"  onclick="setPropinaPaypal(0,this)"  style="flex:1; padding:.5rem .4rem; font-size:.8rem; font-weight:600; border-radius:var(--radius-sm); border:2px solid var(--mm-border); background:var(--mm-cream-dark); cursor:pointer;">Sin</button>
+            <button type="button" class="propina-cli-btn" data-pct="10" onclick="setPropinaPaypal(10,this)" style="flex:1; padding:.5rem .4rem; font-size:.8rem; font-weight:600; border-radius:var(--radius-sm); border:2px solid var(--mm-border); background:var(--mm-cream-dark); cursor:pointer;">10%</button>
+            <button type="button" class="propina-cli-btn" data-pct="15" onclick="setPropinaPaypal(15,this)" style="flex:1; padding:.5rem .4rem; font-size:.8rem; font-weight:600; border-radius:var(--radius-sm); border:2px solid var(--mm-border); background:var(--mm-cream-dark); cursor:pointer;">15%</button>
+            <button type="button" class="propina-cli-btn" data-pct="20" onclick="setPropinaPaypal(20,this)" style="flex:1; padding:.5rem .4rem; font-size:.8rem; font-weight:600; border-radius:var(--radius-sm); border:2px solid var(--mm-border); background:var(--mm-cream-dark); cursor:pointer;">20%</button>
+          </div>
+          <div class="input-group input-group-sm mb-2">
+            <span class="input-group-text" style="background:var(--mm-cream-dark); border:1px solid var(--mm-border);">$</span>
+            <input type="number" min="0" step="0.01" inputmode="decimal" id="paypalPropinaInput" value="0.00"
+                   onchange="recalcularTotalPaypal()" oninput="recalcularTotalPaypal()"
+                   class="form-control" style="font-size:.85rem;" placeholder="0.00">
+          </div>
+          <div class="d-flex justify-content-between mb-2" style="font-size:.85rem;">
+            <span style="color:var(--mm-text-muted);">Total a pagar</span>
+            <span class="fw-bold" id="paypalTotalLabel" style="color:var(--mm-green);">$0.00</span>
+          </div>
+
+          <button id="btnPagarPaypal" class="btn btn-primary w-100 py-3 fw-bold" onclick="iniciarPagoPaypal()">
+            <i class="bi bi-paypal me-1"></i><span id="btnPagarPaypalLabel">Pagar con PayPal</span>
+          </button>
+          <p style="font-size:.72rem; color:var(--mm-text-muted); text-align:center; margin-top:.4rem; margin-bottom:0;">
+            Te llevaremos a PayPal en esta misma pestaña para completar el pago.
+          </p>
+          <div id="paypalError" style="font-size:.8rem; color:#721c24; background:#FDEDEC; border-radius:6px; padding:.4rem .75rem; margin-top:.5rem; display:none;"></div>
+        </div>
+
+        <button class="btn w-100 py-2 mt-3" style="background:var(--mm-cream-dark);" data-bs-dismiss="modal">Cancelar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{# ── Modal: Cuenta pagada ── #}
+{# Aparece cuando el polling detecta que el mesero cerró la cuenta.             #}
+{# data-bs-backdrop/keyboard="false": no se puede cerrar accidentalmente.      #}
+<!-- Modal: Cuenta pagada (la mesa o esta sesión fue saldada por el mesero) -->
+<div class="modal fade" id="cuentaPagadaModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false">
+  <div class="modal-dialog modal-dialog-centered" style="max-width:390px;">
+    <div class="modal-content rounded-4 border-0">
+      <div class="modal-body p-4">
+
+        <div class="text-center mb-3">
+          <i class="bi bi-receipt" style="font-size:3.5rem; line-height:1; color:var(--mm-green); display:block;"></i>
+          <h5 class="fw-bold mt-2 mb-1">¡Cuenta pagada!</h5>
+          <p style="font-size:.82rem; color:var(--mm-text-muted); margin:0;" id="cpSubtitle">
+            Tu cuenta ya fue saldada. Aquí está tu ticket.
+          </p>
+        </div>
+
+        <!-- Ticket de esta sesión -->
+        <div style="background:var(--mm-cream); border-radius:var(--radius-sm); padding:.75rem 1rem; font-size:.82rem; margin-bottom:1rem;">
+          <div class="d-flex justify-content-between py-1">
+            <span style="color:var(--mm-text-muted);">Mesa</span>
+            <span class="fw-semibold" id="cpMesa">—</span>
+          </div>
+          <div class="d-flex justify-content-between py-1">
+            <span style="color:var(--mm-text-muted);">Cliente</span>
+            <span class="fw-semibold" id="cpAlias">—</span>
+          </div>
+          <div class="d-flex justify-content-between py-1" style="border-bottom:1px dashed var(--mm-border); margin-bottom:.5rem;">
+            <span style="color:var(--mm-text-muted);">Método</span>
+            <span class="fw-semibold" id="cpMetodo">—</span>
+          </div>
+          <div id="cpItems" style="margin-bottom:.5rem;"></div>
+          <div class="d-flex justify-content-between fw-bold" style="font-size:.9rem; border-top:1px dashed var(--mm-border); padding-top:.5rem;">
+            <span id="cpTotalLabel">Total pagado</span>
+            <span id="cpTotal" style="color:var(--mm-green);">$0.00</span>
+          </div>
+        </div>
+
+        <button class="btn w-100 py-2 mb-2 rounded-3" style="background:var(--mm-cream-dark);" onclick="imprimirTicketCuenta()">
+          <i class="bi bi-printer me-2"></i>Imprimir ticket
+        </button>
+        <button class="btn btn-primary w-100 py-3 fw-bold rounded-3 mb-2" onclick="seguirEnSesion()">
+          <i class="bi bi-eye me-2"></i>Seguir viendo mis pedidos
+        </button>
+        <button class="btn w-100 py-2 rounded-3" style="background:var(--mm-cream-dark);" onclick="salirDeSesion()">
+          <i class="bi bi-box-arrow-right me-2"></i>Salir
+        </button>
+
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+const CSRF = getCsrf();
+// Subtotales (sin propina) inyectados desde el servidor para previsualizar el
+// total con propina en el panel PayPal (fix 1.6). El servidor es autoritativo
+// al crear la orden — estos valores son solo para la UI.
+const SUBTOTAL_CLIENTE = parseFloat('{{ total_general|default:0|floatformat:2 }}') || 0;
+const SUBTOTAL_MESA    = parseFloat('{{ total_mesa|default:0|floatformat:2 }}') || 0;
+// Ticket inyectado por el servidor cuando volvemos del flujo PayPal redirect
+// (fix 1.3 + 1.7). Pre-serializado a JSON desde la vista. Si está presente, se
+// muestra el modal unificado de inmediato.
+const PAYPAL_TICKET_INICIAL = {{ paypal_ticket_inicial_json|default:"null"|safe }};
+const PAYPAL_OK_FLAG        = {{ paypal_ok|yesno:"true,false" }};
+const PAYPAL_CANCELADO_FLAG = {{ paypal_cancelado|yesno:"true,false" }};
+const PAYPAL_ERROR_FLAG     = {{ paypal_error|yesno:"true,false" }};
+const PAYPAL_ERROR_MSG      = '{{ paypal_error_msg|default:""|escapejs }}';
+
+let _metodoCuenta = 'EFECTIVO';  // Método de pago activo en el modal de cuenta
+
+// Agrega la clase 'selected' a la tarjeta de radio activa para resaltar visualmente
+// cuál de las opciones (individual/grupal) está seleccionada.
+// Radio cards: visual selection
+document.querySelectorAll('input[name="tipoCobro"]').forEach(input => {
+  input.closest('label').addEventListener('click', () => {
+    document.querySelectorAll('input[name="tipoCobro"]').forEach(i => i.closest('label').classList.remove('selected'));
+    input.closest('label').classList.add('selected');
+  });
+});
+document.querySelector('input[name="tipoCobro"][checked]')?.closest('label').classList.add('selected');
+
+// Abre el modal de pedir cuenta, reseteando el panel de PayPal (propina + error)
+// y dejando Efectivo seleccionado por defecto.
+function openBillModal() {
+  const ppError = document.getElementById('paypalError');
+  if (ppError) ppError.style.display = 'none';
+  // Reset propina PayPal
+  const propInput = document.getElementById('paypalPropinaInput');
+  if (propInput) propInput.value = '0.00';
+  // Limpiar resaltado de presets
+  document.querySelectorAll('.propina-cli-btn').forEach(b => {
+    b.style.borderColor = 'var(--mm-border)';
+    b.style.background  = 'var(--mm-cream-dark)';
+    b.style.color       = 'inherit';
+  });
+  recalcularTotalPaypal();
+  // Reset a Efectivo
+  const efBtn = document.querySelector('.metodo-cli-btn[data-metodo="EFECTIVO"]');
+  if (efBtn) selMetodoCuenta('EFECTIVO', efBtn);
+  new bootstrap.Modal(document.getElementById('billModal')).show();
+}
+
+// Actualiza el método de pago activo y aplica estilos de selección al botón.
+// Para PayPal solo muestra el panel — el flujo es redirect en la misma pestaña
+// (fix 1.7), no SDK Buttons popup.
+function selMetodoCuenta(metodo, el) {
+  _metodoCuenta = metodo;
+  document.querySelectorAll('.metodo-cli-btn').forEach(b => {
+    b.style.borderColor = 'var(--mm-border)';
+    b.style.background  = 'var(--mm-cream-dark)';
+    b.style.color       = 'inherit';
+  });
+  el.style.borderColor = 'var(--mm-green)';
+  el.style.background  = 'var(--mm-green-pale)';
+  el.style.color       = 'var(--mm-green)';
+
+  if (metodo === 'PAYPAL') {
+    document.getElementById('accionMesero').style.display = 'none';
+    document.getElementById('accionPaypal').style.display = 'block';
+    recalcularTotalPaypal();
+  } else {
+    document.getElementById('accionMesero').style.display = 'block';
+    document.getElementById('accionPaypal').style.display = 'none';
+  }
+}
+
+// Envía la solicitud de cuenta al mesero (para efectivo o tarjeta).
+// Si hay pedidos no entregados, el backend devuelve requiere_confirmacion=true
+// y se muestra un modal de confirmación antes de proceder.
+async function confirmarCuenta(forzar = false) {
+  const btn = document.getElementById('btnNotificarMesero');
+  if (btn) { btn.disabled = true; btn.textContent = 'Enviando…'; }
+  try {
+    const tipo = document.querySelector('input[name="tipoCobro"]:checked')?.value || 'individual';
+    const body = { tipo, metodo_preferido: _metodoCuenta };
+    if (forzar) body.confirmar_sin_entrega = true;
+
+    const res  = await fetch('{% url "cliente:solicitar_cuenta" %}', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      bootstrap.Modal.getInstance(document.getElementById('billModal')).hide();
+      showToast('¡Solicitud enviada! Tu mesero se acercará en breve.', 'success');
+    } else if (data.requiere_confirmacion) {
+      // Hay pedidos pendientes: mostrar aviso y pedir confirmación
+      if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-bell me-2"></i>Notificar al mesero'; }
+      _mostrarConfirmacionSinEntrega(data.error, tipo);
+    } else {
+      showToast(data.error || 'Error al enviar solicitud', 'error');
+      if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-bell me-2"></i>Notificar al mesero'; }
+    }
+  } catch (e) {
+    showToast('Error de conexión. Intenta de nuevo.', 'error');
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-bell me-2"></i>Notificar al mesero'; }
+  }
+}
+
+// Muestra un modal de confirmación cuando hay pedidos no entregados.
+function _mostrarConfirmacionSinEntrega(mensaje) {
+  // Reutilizamos un diálogo bootstrap simple creado dinámicamente
+  const existing = document.getElementById('confirmSinEntregaModal');
+  if (existing) existing.remove();
+
+  const modal = document.createElement('div');
+  modal.id = 'confirmSinEntregaModal';
+  modal.className = 'modal fade';
+  modal.setAttribute('tabindex', '-1');
+  modal.innerHTML = `
+    <div class="modal-dialog modal-dialog-centered" style="max-width:360px;">
+      <div class="modal-content rounded-4 border-0">
+        <div class="modal-body p-4">
+          <div class="d-flex align-items-center gap-2 mb-3">
+            <i class="bi bi-exclamation-triangle-fill" style="color:var(--mm-warning);font-size:1.4rem;"></i>
+            <h6 class="fw-bold mb-0">Pedidos pendientes</h6>
+          </div>
+          <p style="font-size:.875rem;color:var(--mm-text-muted);">${mensaje}</p>
+          <div class="d-flex gap-2 mt-3">
+            <button class="btn flex-grow-1 py-2" style="background:var(--mm-cream-dark);"
+                    data-bs-dismiss="modal">Esperar</button>
+            <button class="btn btn-primary flex-grow-1 py-2"
+                    onclick="bootstrap.Modal.getInstance(document.getElementById('confirmSinEntregaModal')).hide(); confirmarCuenta(true);">
+              Solicitar igual
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+  new bootstrap.Modal(modal).show();
+}
+
+// ── PayPal redirect flow (fix 1.3 + 1.6 + 1.7) ───────────────────────────────
+// El cliente NO ve un popup SDK. Aplica propina y pulsa "Pagar con PayPal" — el
+// frontend pide al backend que cree la orden con `return_url`/`cancel_url` y
+// hace `window.location.href = approve_url` para redirigir la pestaña actual.
+// PayPal redirige luego a `cliente:paypal_retorno` que captura y vuelve aquí
+// con `?paypal_ok=1` y el ticket guardado en la sesión Django.
+
+// Subtotal usado para el preview del panel PayPal — depende del tipo de cobro
+// activo (individual = consumo del cliente, grupal = total de la mesa).
+function _paypalSubtotalActual() {
+  const tipo = document.querySelector('input[name="tipoCobro"]:checked')?.value || 'individual';
+  return tipo === 'grupal' ? SUBTOTAL_MESA : SUBTOTAL_CLIENTE;
+}
+
+// Aplica un preset de propina (% del subtotal correspondiente al tipo de cobro).
+// Actualiza el input numérico y el resaltado del botón seleccionado.
+function setPropinaPaypal(pct, btn) {
+  const monto = Math.round(((_paypalSubtotalActual() * pct) / 100) * 100) / 100;
+  const input = document.getElementById('paypalPropinaInput');
+  if (input) input.value = monto.toFixed(2);
+  document.querySelectorAll('.propina-cli-btn').forEach(b => {
+    b.style.borderColor = 'var(--mm-border)';
+    b.style.background  = 'var(--mm-cream-dark)';
+    b.style.color       = 'inherit';
+  });
+  if (btn) {
+    btn.style.borderColor = 'var(--mm-green)';
+    btn.style.background  = 'var(--mm-green-pale)';
+    btn.style.color       = 'var(--mm-green)';
+  }
+  recalcularTotalPaypal();
+}
+
+// Recalcula "Total a pagar" = subtotal del tipo activo + propina ingresada.
+// Es UI informativa; el backend recalcula el subtotal real desde la BD al crear
+// la orden, así que cualquier manipulación del DOM es inofensiva.
+function recalcularTotalPaypal() {
+  const input = document.getElementById('paypalPropinaInput');
+  let prop = parseFloat(input ? input.value : '0');
+  if (!isFinite(prop) || prop < 0) prop = 0;
+  const total = _paypalSubtotalActual() + prop;
+  const lbl = document.getElementById('paypalTotalLabel');
+  if (lbl) lbl.textContent = '$' + total.toFixed(2);
+}
+
+// Cuando el cliente cambia entre individual y grupal, recalcular el total y
+// limpiar la selección de chip (los % son de bases distintas).
+document.querySelectorAll('input[name="tipoCobro"]').forEach(r => {
+  r.addEventListener('change', () => {
+    document.querySelectorAll('.propina-cli-btn').forEach(b => {
+      b.style.borderColor = 'var(--mm-border)';
+      b.style.background  = 'var(--mm-cream-dark)';
+      b.style.color       = 'inherit';
+    });
+    recalcularTotalPaypal();
+  });
+});
+
+// Inicia el pago: pide al backend que cree la orden y redirige a PayPal en la
+// misma pestaña. Al volver, paypal_retorno_cliente captura y nos devuelve aquí.
+async function iniciarPagoPaypal() {
+  const errEl = document.getElementById('paypalError');
+  const btn   = document.getElementById('btnPagarPaypal');
+  const lblEl = document.getElementById('btnPagarPaypalLabel');
+  if (errEl) errEl.style.display = 'none';
+
+  const tipo = document.querySelector('input[name="tipoCobro"]:checked')?.value || 'individual';
+  const input = document.getElementById('paypalPropinaInput');
+  let prop = parseFloat(input ? input.value : '0');
+  if (!isFinite(prop) || prop < 0) prop = 0;
+
+  if (btn) { btn.disabled = true; }
+  if (lblEl) { lblEl.textContent = 'Conectando con PayPal…'; }
+
+  try {
+    const res  = await fetch('{% url "cliente:paypal_crear_orden" %}', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+      body: JSON.stringify({ tipo, propina: prop.toFixed(2) }),
+    });
+    const data = await res.json();
+    if (!data.ok || !data.approve_url) {
+      throw new Error(data.error || 'No se pudo iniciar el pago.');
+    }
+    // Redirige la pestaña actual a PayPal — PayPal devolverá al cliente a
+    // /pago/paypal/retorno/ tras aprobar (fix 1.7).
+    window.location.href = data.approve_url;
+  } catch (e) {
+    if (errEl) {
+      errEl.textContent = (e && e.message) || 'Error al iniciar pago con PayPal.';
+      errEl.style.display = 'block';
+    }
+    if (btn) { btn.disabled = false; }
+    if (lblEl) { lblEl.textContent = 'Pagar con PayPal'; }
+  }
+}
+
+// Envía una solicitud de ayuda al mesero desde la vista de pedidos
+// (equivalente al botón de Ayuda del nav global, pero local a esta vista).
+async function solicitarAyuda() {
+  const res = await fetch('{% url "cliente:solicitar_ayuda" %}', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+    body: '{}'
+  });
+  const data = await res.json();
+  if (data.ok) {
+    showToast('Mesero notificado', 'success');
+  } else {
+    // 2.3: mostrar el mensaje del rate-limit (o cualquier otro error).
+    showToast(data.error || 'No se pudo notificar al mesero.', 'error');
+  }
+}
+
+// ─── Polling de pedidos ────────────────────────────────────────────────────
+// Polling cada 5 s — actualiza badge, stepper y mensaje de estado
+// Guard _ordersPolling evita solapamiento si la red es lenta.
+// _ordersLastTs descarta respuestas desordenas (timestamp del servidor).
+let _ordersPolling = false;
+let _ordersLastTs  = 0;
+
+async function pollOrders() {
+  if (_ordersPolling) return;
+  if (document.visibilityState === 'hidden') return;
+  _ordersPolling = true;
+  try {
+    const res  = await fetch('{% url "cliente:estado_pedidos" %}');
+    const data = await res.json();
+    const serverTs = data.ts || Date.now();
+    if (serverTs < _ordersLastTs) return;
+    _ordersLastTs = serverTs;
+    if (!data.ok) return;
+
+    data.pedidos.forEach(p => {
+      const card = document.getElementById(`order-${p.id}`);
+      if (!card) return;
+
+      // 1) Badge de estado
+      const badge = card.querySelector('.order-status-badge');
+      if (badge) {
+        badge.className = `order-status-badge status-${p.estado}`;
+        badge.textContent = p.estado_display;
+      }
+
+      // 2) Stepper de progreso
+      const dots  = card.querySelectorAll('.step-dot');
+      const lines = card.querySelectorAll('.step-line');
+      const estado = p.estado;
+      if (dots.length === 3 && lines.length === 2) {
+        if (estado === 'cancelado') {
+          dots.forEach(d => d.classList.remove('done','current'));
+          lines.forEach(l => l.classList.remove('done'));
+        } else {
+          dots[0].classList.toggle('done',    ['preparando','listo','entregado'].includes(estado));
+          dots[0].classList.toggle('current', estado === 'recibido');
+          lines[0].classList.toggle('done',   ['preparando','listo','entregado'].includes(estado));
+          dots[1].classList.toggle('done',    ['listo','entregado'].includes(estado));
+          dots[1].classList.toggle('current', estado === 'preparando');
+          lines[1].classList.toggle('done',   ['listo','entregado'].includes(estado));
+          dots[2].classList.toggle('done',    estado === 'entregado');
+          dots[2].classList.toggle('current', estado === 'listo');
+        }
+      }
+
+      // 3) Mensaje animado de estado — se crea una sola vez y se actualiza su innerHTML
+      let msgEl = card.querySelector('.estado-msg');
+      if (!msgEl) {
+        msgEl = document.createElement('div');
+        msgEl.className = 'estado-msg mt-2 d-flex align-items-center gap-2';
+        const itemsDiv = card.querySelector('.mt-2');
+        if (itemsDiv) itemsDiv.after(msgEl); else card.appendChild(msgEl);
+      }
+      if (estado === 'preparando') {
+        msgEl.style.cssText = 'font-size:.8rem;color:var(--mm-warning);';
+        msgEl.innerHTML = '<span class="spinner-grow spinner-grow-sm" role="status" style="width:.5rem;height:.5rem;background:var(--mm-warning);"></span> En preparación…';
+      } else if (estado === 'listo') {
+        msgEl.style.cssText = 'font-size:.8rem;color:var(--mm-success);';
+        msgEl.innerHTML = '<i class="bi bi-check-circle-fill"></i> ¡Listo! Tu mesero lo llevará pronto';
+      } else {
+        msgEl.innerHTML = '';
+      }
+    });
+  } catch(e) { console.warn('pollOrders error:', e); }
+  finally { _ordersPolling = false; }
+}
+
+// Ejecuta una primera consulta al cargar y cada vez que la pestaña vuelve a estar visible.
+document.addEventListener('DOMContentLoaded', () => pollOrders());
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') pollOrders();
+});
+setInterval(pollOrders, 5000);
+
+// ─── Polling de estado de SESIÓN — detecta cuándo la cuenta fue pagada ───────
+// (problema 2) Cuando el mesero cobra la mesa, la sesión pasa a "pagada".
+// En vez de expulsar al cliente, mostramos el ticket y le damos opciones.
+let _cuentaPagadaMostrada = false;
+let _ticketCuenta = null;
+let _sesionPolling = false;   // P7: guard de anti-solapamiento
+
+async function pollSesion() {
+  if (_sesionPolling) return;                       // P7: evita solapamiento bajo red lenta
+  if (document.visibilityState === 'hidden') return;
+  _sesionPolling = true;
+  try {
+    const res = await fetch('{% url "cliente:estado_sesion" %}');
+    if (!res.ok) return;
+    const data = await res.json();
+    if (data.ok && data.pagada && !_cuentaPagadaMostrada) {
+      _cuentaPagadaMostrada = true;
+      mostrarCuentaPagada(data.ticket);
+    }
+  } catch (e) { console.warn('pollSesion error:', e); }
+  finally { _sesionPolling = false; }
+}
+
+// Muestra el modal de cuenta pagada con el ticket del servidor.
+// Adapta el texto según si el pago fue individual o grupal.
+// Bloquea el botón "Pedir la cuenta" para evitar solicitudes duplicadas.
+function mostrarCuentaPagada(ticket) {
+  // Marcar la bandera para que el polling de sesión no reabra el modal
+  // si llega después del PayPal (la sesión ya estará "pagada" en el server).
+  _cuentaPagadaMostrada = true;
+  // Bloquear acciones que ya no aplican (pedir cuenta de nuevo)
+  const btnCuenta = document.querySelector('button[onclick="openBillModal()"]');
+  if (btnCuenta) { btnCuenta.disabled = true; btnCuenta.style.opacity = '.5'; }
+
+  if (ticket) {
+    _ticketCuenta = ticket;
+    document.getElementById('cpMesa').textContent   = ticket.mesa;
+    document.getElementById('cpAlias').textContent  = ticket.alias;
+    document.getElementById('cpMetodo').textContent = ticket.metodo || '—';
+    document.getElementById('cpItems').innerHTML    = (ticket.items || []).map(i =>
+      `<div style="display:flex;justify-content:space-between;margin-bottom:.2rem;">
+         <span>${i.cantidad}× ${i.nombre}</span><span>$${i.subtotal.toFixed(2)}</span>
+       </div>`
+    ).join('') || '<div style="color:var(--mm-text-muted);">Sin consumo registrado</div>';
+
+    // En pago grupal, cada cliente ve SU consumo + el total de la mesa cobrado.
+    if (ticket.tipo === 'grupal') {
+      document.getElementById('cpSubtitle').textContent =
+        'Toda la mesa fue pagada. Este es tu consumo dentro de la cuenta.';
+      document.getElementById('cpTotalLabel').textContent = 'Total de la mesa';
+    } else {
+      document.getElementById('cpSubtitle').textContent =
+        'Tu cuenta ya fue saldada. Aquí está tu ticket.';
+      document.getElementById('cpTotalLabel').textContent = 'Total pagado';
+    }
+    document.getElementById('cpTotal').textContent = '$' + (ticket.total_pagado || 0).toFixed(2);
+  }
+  new bootstrap.Modal(document.getElementById('cuentaPagadaModal')).show();
+}
+
+// 1.8: abre el PDF oficial del ticket en una pestaña — mismo layout que ve el
+// mesero (plantilla `mesero/ticket.html` + WeasyPrint). Si no hay sol_id en el
+// payload (raro: pago aún no registrado en BD), avisamos sin crashear.
+function imprimirTicketCuenta() {
+  const t = _ticketCuenta;
+  if (!t || !t.sol_id) {
+    showToast('Ticket todavía no disponible. Inténtalo en unos segundos.', 'error');
+    return;
+  }
+  // Reverse con id fijo 0 y luego sustituimos por el real (Django no expone
+  // reverses parametrizables al cliente JS).
+  const url = '{% url "cliente:ticket_pdf" 0 %}'.replace('/0/', '/' + t.sol_id + '/');
+  window.open(url, '_blank');
+}
+
+function seguirEnSesion() {
+  // El cliente decide quedarse: cerramos el modal y activamos el modo solo-lectura
+  // en el DOM (la sesión sigue cargada, pero ya no puede pedir ni recobrar).
+  const m = bootstrap.Modal.getInstance(document.getElementById('cuentaPagadaModal'));
+  if (m) m.hide();
+
+  // Mostrar banner de "cuenta pagada" si aún no está en el DOM
+  const content = document.querySelector('.px-3.pt-3');
+  if (content && !document.getElementById('paidBanner')) {
+    const banner = document.createElement('div');
+    banner.id = 'paidBanner';
+    banner.style.cssText = 'background:#EAFAF1;border:1px solid #2ECC71;color:#1E8449;border-radius:var(--radius-sm);padding:.7rem .85rem;margin-bottom:.85rem;display:flex;align-items:center;gap:.6rem;';
+    banner.innerHTML = `
+      <i class="bi bi-check-circle-fill" style="font-size:1.1rem;"></i>
+      <div style="flex:1;font-size:.82rem;line-height:1.25;">
+        <strong>Cuenta pagada.</strong> Puedes seguir viendo tus pedidos aquí.
+      </div>
+      <button class="btn btn-sm rounded-3 fw-semibold" style="background:#1E8449;color:#fff;font-size:.75rem;" onclick="salirDeSesion()">
+        <i class="bi bi-box-arrow-right me-1"></i>Salir
+      </button>`;
+    content.insertBefore(banner, content.firstChild);
+  }
+
+  // Ocultar botones de acción que ya no aplican (pedir cuenta, llamar al mesero)
+  document.querySelectorAll('button[onclick="openBillModal()"], button[onclick="solicitarAyuda()"]').forEach(btn => {
+    btn.closest('.mb-2, .mb-3') ? btn.parentElement.remove() : btn.remove();
+  });
+
+  showToast('Tu cuenta ya está pagada. Puedes seguir viendo tus pedidos.', 'success');
+}
+
+// Llama al endpoint de cierre de sesión y redirige a bienvenida.
+// Si falla la petición, redirige igual (falla silenciosa).
+async function salirDeSesion() {
+  try {
+    const res = await fetch('{% url "cliente:cerrar_sesion_cliente" %}', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+      body: '{}',
+    });
+    const data = await res.json();
+    window.location.href = (data && data.redirect) || '{% url "cliente:bienvenida" %}';
+  } catch (e) {
+    window.location.href = '{% url "cliente:bienvenida" %}';
+  }
+}
+
+// Ejecuta un primer check de sesión al cargar y retoma el polling
+// cada vez que el usuario vuelve a la pestaña.
+document.addEventListener('DOMContentLoaded', () => pollSesion());
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') pollSesion();
+});
+setInterval(pollSesion, 5000);
+
+// ── Retorno del flujo PayPal redirect (fix 1.3 / 1.7) ───────────────────────
+// paypal_retorno_cliente captura la orden y deja el ticket en la sesión Django,
+// redirigiéndonos aquí con ?paypal_ok=1. Mostramos el mismo modal unificado de
+// "Cuenta pagada" que aparece tras un cobro de mesero — el cliente NO es expulsado.
+document.addEventListener('DOMContentLoaded', () => {
+  if (PAYPAL_TICKET_INICIAL) {
+    mostrarCuentaPagada(PAYPAL_TICKET_INICIAL);
+  } else if (PAYPAL_CANCELADO_FLAG) {
+    showToast('Pago en PayPal cancelado. Puedes intentarlo de nuevo.', 'info');
+  } else if (PAYPAL_ERROR_FLAG) {
+    showToast(PAYPAL_ERROR_MSG || 'No se pudo completar el pago con PayPal.', 'error');
+  }
+  // Limpiar query params del URL para que recargar la página no re-dispare el modal.
+  if (PAYPAL_OK_FLAG || PAYPAL_CANCELADO_FLAG || PAYPAL_ERROR_FLAG) {
+    if (window.history && window.history.replaceState) {
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+  }
+});
+</script>
+{% endblock %}

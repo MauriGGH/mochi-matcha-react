@@ -1,0 +1,531 @@
+{# kds.html — Kitchen Display System (KDS) de Mochi Matcha.                          #}
+{# Muestra en tiempo real los pedidos pendientes y listos para el área seleccionada.  #}
+{# El área (cocina | bar) se pasa como parámetro GET y filtra los ítems visibles.     #}
+{# El polling automático (cada 3 s) actualiza ambas columnas sin recargar la página.  #}
+{% load static %}
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Kitchen Display — Mochi Matcha</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500;600&family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+  {% load static %}
+  <link href="{% static 'css/mochi.css' %}" rel="stylesheet">
+  <link href="{% static 'css/staff.css' %}" rel="stylesheet">
+</head>
+<body class="kds-body">
+
+{# ─── Barra superior del KDS ──────────────────────────────────────────────────── #}
+{# Contiene: logo, tabs de área (cocina/bar), contadores y leyenda del semáforo.    #}
+<!-- KDS Header -->
+<header class="kds-header">
+  <div class="d-flex align-items-center gap-3">
+    <i class="bi bi-cup-hot-fill" style="font-size:1.25rem; color:#fff;"></i>
+    <div>
+      <span style="font-weight:700; font-size:.9rem;">Kitchen Display</span>
+      <span style="color:#888; font-size:.8rem; margin-left:.4rem;">Mochi Matcha</span>
+    </div>
+    {# Tabs de área: cada tab recarga la misma vista con ?area=cocina o ?area=bar. #}
+    <!-- Area tabs -->
+    <div class="d-flex gap-1 ms-2">
+      <a href="{% url 'cocina:kds' %}?area=cocina"
+         class="btn btn-sm {% if area == 'cocina' %}btn-primary{% else %}btn-outline-secondary border-0{% endif %} px-3"
+         style="font-size:.8rem; {% if area != 'cocina' %}color:#aaa; background:#2a2a2a;{% endif %}">
+        <i class="bi bi-fire me-1"></i>Cocina
+      </a>
+      <a href="{% url 'cocina:kds' %}?area=bar"
+         class="btn btn-sm {% if area == 'bar' %}btn-primary{% else %}btn-outline-secondary border-0{% endif %} px-3"
+         style="font-size:.8rem; {% if area != 'bar' %}color:#aaa; background:#2a2a2a;{% endif %}">
+        <i class="bi bi-cup-straw me-1"></i>Bar
+      </a>
+    </div>
+    {# Contadores numéricos actualizados por JS en cada ciclo de polling. #}
+    <!-- Counters -->
+    <div class="d-flex gap-2 ms-2">
+      <span class="badge rounded-pill px-3 py-2" style="background:#2a2a2a; color:var(--kds-yellow); font-size:.78rem;">
+        <i class="bi bi-clock me-1"></i>Pendientes <span id="pendCount">{{ pendientes_count }}</span>
+      </span>
+      <span class="badge rounded-pill px-3 py-2" style="background:#2a2a2a; color:var(--kds-green); font-size:.78rem;">
+        <i class="bi bi-check2-circle me-1"></i>Listos <span id="doneCount">{{ listos_count }}</span>
+      </span>
+    </div>
+  </div>
+  <div class="d-flex align-items-center gap-3">
+    {# Leyenda del semáforo: los valores (min) se actualizan desde JS cuando el #}
+    {# gerente guarda los umbrales en el modal de configuración.                #}
+    <!-- Semaphore legend -->
+    <div class="d-flex align-items-center gap-2" style="font-size:.72rem;">
+      <span style="color:var(--kds-green);">● 0–<span id="legGreen">5</span> min</span>
+      <span style="color:var(--kds-yellow);">● <span id="legYellow">5</span>–<span id="legRed">10</span> min</span>
+      <span style="color:var(--kds-red);">● +<span id="legRedVal">10</span> min</span>
+    </div>
+    <button class="btn btn-sm" style="background:#2a2a2a; color:#aaa; border:none;" onclick="openSettings()">
+      <i class="bi bi-gear"></i>
+    </button>
+    <span style="font-size:.8rem; color:#666;" id="kds-clock"></span>
+    <a href="{% url 'cocina:logout_cocina' %}" style="color:#666; text-decoration:none; font-size:.8rem;">Salir</a>
+  </div>
+</header>
+
+{# ─── Columnas principales del KDS ──────────────────────────────────────────── #}
+{# Columna izquierda: pedidos pendientes (recibido / preparando) de esta área.   #}
+{# Columna derecha:   pedidos con estado global "listo", listos para el mesero.  #}
+<!-- KDS Columns -->
+<div class="kds-columns">
+  <!-- Pending column -->
+  <div class="kds-column">
+    <div class="kds-col-header pending">
+      <i class="bi bi-hourglass-split me-2"></i>{{ area|title }} — Pedidos Pendientes
+    </div>
+    {# data-ts: timestamp Unix del pedido; el JS lo usa para calcular el tiempo        #}
+    {# transcurrido y aplicar el color del semáforo (verde/amarillo/rojo).            #}
+    {# data-estado: permite al JS detectar cambios de estado entre ciclos de polling. #}
+    <div class="kds-col-body" id="pendingCol">
+      {% for pedido in pedidos %}
+      <div class="kds-card" id="ticket-{{ pedido.pk }}" data-ts="{{ pedido.fecha_hora_ingreso|date:'U' }}" data-estado="{{ pedido.estado }}">
+        <div class="kds-card-header">
+          <div class="d-flex align-items-center gap-2">
+            <span class="kds-table-badge">Mesa {{ pedido.sesion.mesa.numero_mesa }}</span>
+            <span style="font-size:.8rem; color:#ccc;">{{ pedido.sesion.alias }}</span>
+          </div>
+          <span class="kds-timer green" id="timer-{{ pedido.pk }}">0:00</span>
+        </div>
+        <div class="kds-items">
+          {% for d in pedido.detalles_filtrados %}
+          <div class="kds-item">
+            <div>
+              <span class="kds-item-qty">{{ d.cantidad }}×</span>{{ d.producto.nombre }}
+              {% if d.modificadores.all %}
+              <div class="kds-item-mods">{% for m in d.modificadores.all %}{{ m.opcion.nombre_opcion }}{% if not forloop.last %} · {% endif %}{% endfor %}</div>
+              {% endif %}
+              {% if d.notas %}
+              <div class="kds-item-notes" style="color:#e74c3c; font-weight:600;"><i class="bi bi-exclamation-triangle-fill me-1"></i>{{ d.notas|upper }}</div>
+              {% endif %}
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+        {# Botón de acción: el primer clic cambia a "preparando" (sin marcar ítems); #}
+        {# el segundo clic marca los ítems de ESTA área como listos.               #}
+        <div class="d-flex gap-2">
+          {% if pedido.estado == 'recibido' %}
+          <button class="btn-listo btn-comenzar" onclick="marcarListo({{ pedido.pk }}, this)">
+            <i class="bi bi-play-circle me-2"></i>Comenzar preparación
+          </button>
+          {% else %}
+          <button class="btn-listo" onclick="marcarListo({{ pedido.pk }}, this)">
+            <i class="bi bi-check2-all me-2"></i>Marcar como Listo
+          </button>
+          {% endif %}
+        </div>
+      </div>
+      {% empty %}
+      <div class="text-center py-5 kds-empty-state" id="pendingEmpty" style="color:#555;">
+        <i class="bi bi-check-circle-fill" style="font-size:2.5rem; margin-bottom:.75rem; display:block;"></i>
+        <div style="font-size:.875rem;">Sin pedidos pendientes</div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  {# ─── Columna de listos ──────────────────────────────────────────────────── #}
+  {# Solo muestra el resumen del pedido. La entrega la registra el mesero desde #}
+  {# su propio panel; aquí el KDS es de solo lectura.                           #}
+  <!-- Done column -->
+  <div class="kds-column">
+    <div class="kds-col-header done">
+      <i class="bi bi-check2-circle me-2"></i>Listos para Entrega
+    </div>
+    <div class="kds-col-body" id="doneCol">
+      {% for pedido in pedidos_listos %}
+      <div style="background:#1e1e1e; border-radius:var(--radius-sm); padding:.75rem 1rem; border-left:3px solid var(--kds-green); margin-bottom:.5rem;" id="done-{{ pedido.pk }}">
+        <div class="d-flex align-items-center justify-content-between mb-1">
+          <div class="d-flex align-items-center gap-2">
+            <span class="kds-table-badge">Mesa {{ pedido.sesion.mesa.numero_mesa }}</span>
+            <span style="font-size:.8rem; color:#aaa;">{{ pedido.sesion.alias }}</span>
+          </div>
+          <i class="bi bi-check-circle-fill" style="color:var(--kds-green);"></i>
+        </div>
+        <div style="font-size:.8rem; color:#888;">
+          {% for d in pedido.detalles.all %}
+          {{ d.cantidad }}× {{ d.producto.nombre }}{% if not forloop.last %}, {% endif %}
+          {% endfor %}
+        </div>
+        <div style="font-size:.72rem; color:#555; margin-top:.25rem;">El mesero registra la entrega desde su panel</div>
+      </div>
+      {% empty %}
+      <div class="text-center py-5 kds-empty-state" id="doneEmpty" style="color:#555;">
+        <i class="bi bi-bowl" style="font-size:2rem; margin-bottom:.5rem; display:block;"></i>
+        <div style="font-size:.875rem;">Nada listo aún</div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+
+{# ─── Modal de configuración del semáforo ────────────────────────────────── #}
+{# Permite al operario ajustar los umbrales de color para esta sesión.         #}
+{# Los cambios son locales a la pantalla; los valores canónicos los define      #}
+{# el gerente en la BD (se recargan al entrar al KDS).                         #}
+<!-- Settings Modal -->
+<div class="modal fade" id="settingsModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered" style="max-width:400px;">
+    <div class="modal-content rounded-4 border-0" style="background:#1e1e1e; color:#fff;">
+      <div class="modal-body p-4">
+        <div class="d-flex align-items-center gap-2 mb-3">
+          <i class="bi bi-gear"></i>
+          <h5 class="mb-0 fw-bold">Semáforo de Tiempos</h5>
+          <button class="btn-close btn-close-white ms-auto" data-bs-dismiss="modal"></button>
+        </div>
+        <p style="font-size:.85rem; color:#999; margin-bottom:1.5rem;">Configura los umbrales de tiempo (en minutos) para los indicadores de color de los tickets.</p>
+
+        <div class="mb-3 p-3 rounded-3" style="background:#2a2a2a;">
+          <div class="d-flex align-items-center gap-2 mb-1">
+            <span style="color:var(--kds-green); font-size:.8rem;">●</span>
+            <span style="color:var(--kds-green); font-size:.875rem; font-weight:600;">VERDE — A tiempo</span>
+          </div>
+          <div style="font-size:.8rem; color:#888;">De 0 a <span id="greenMax">5</span> min</div>
+        </div>
+
+        <div class="mb-3 p-3 rounded-3" style="background:#2a2a2a;">
+          <div class="d-flex align-items-center justify-content-between mb-2">
+            <div class="d-flex align-items-center gap-2">
+              <span style="color:var(--kds-yellow);">●</span>
+              <span style="color:var(--kds-yellow); font-size:.875rem; font-weight:600;">AMARILLO — Advertencia</span>
+            </div>
+          </div>
+          <div class="d-flex align-items-center gap-2">
+            <span style="font-size:.8rem; color:#888;">A partir de los</span>
+            <input type="number" id="yellowThresh" min="1" max="30" value="5" class="form-control form-control-sm text-center" style="width:60px; background:#333; border-color:#444; color:#fff;">
+            <span style="font-size:.8rem; color:#888;">min</span>
+          </div>
+        </div>
+
+        <div class="mb-4 p-3 rounded-3" style="background:#2a2a2a;">
+          <div class="d-flex align-items-center justify-content-between mb-2">
+            <div class="d-flex align-items-center gap-2">
+              <span style="color:var(--kds-red);">●</span>
+              <span style="color:var(--kds-red); font-size:.875rem; font-weight:600;">ROJO — Retrasado</span>
+            </div>
+          </div>
+          <div class="d-flex align-items-center gap-2">
+            <span style="font-size:.8rem; color:#888;">A partir de los</span>
+            <input type="number" id="redThresh" min="1" max="60" value="10" class="form-control form-control-sm text-center" style="width:60px; background:#333; border-color:#444; color:#fff;">
+            <span style="font-size:.8rem; color:#888;">min</span>
+          </div>
+        </div>
+
+        <div class="d-flex gap-2">
+          <button class="btn flex-grow-1 py-2" style="background:#333; color:#fff; border:none;" data-bs-dismiss="modal">Cancelar</button>
+          <button class="btn btn-primary flex-grow-1 py-2" onclick="saveSettings()">Guardar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+// ─── Constantes globales ────────────────────────────────────────────────────
+// CSRF: token extraído de la cookie para enviarlo en las peticiones POST al servidor.
+const CSRF = document.cookie.split(';').find(c=>c.trim().startsWith('csrftoken='))?.split('=')[1] || '';
+// AREA: área activa inyectada por Django ('cocina' | 'bar'). Usada en polling y en marcarListo.
+const AREA = '{{ area }}';
+
+// ─── Toast de notificación ──────────────────────────────────────────────────
+// Muestra un mensaje flotante temporal (2.2 s) en la parte inferior central.
+function showToast(msg, type='success') {
+  const t = document.createElement('div');
+  t.textContent = msg;
+  t.style.cssText = `position:fixed;bottom:1.5rem;left:50%;transform:translateX(-50%);
+    padding:.6rem 1.2rem;border-radius:8px;font-weight:700;font-size:.9rem;z-index:9999;
+    color:#fff;background:${type==='success'?'#2ecc71':'#e74c3c'};
+    box-shadow:0 4px 16px rgba(0,0,0,.35);transition:opacity .4s;`;
+  document.body.appendChild(t);
+  setTimeout(()=>{ t.style.opacity='0'; setTimeout(()=>t.remove(), 400); }, 2200);
+}
+
+// P5: los umbrales del semáforo son los que el gerente configuró en la BD —
+// el servidor los inyecta SIEMPRE como fuente de verdad. Antes se leían de
+// localStorage como fuente primaria y un caché viejo ignoraba los cambios.
+let settings = { yellow: {{ semaforo_yellow|default:8 }}, red: {{ semaforo_red|default:15 }} };
+
+// ─── Configuración del semáforo ─────────────────────────────────────────────
+// applySettings: propaga los umbrales actuales a todos los elementos del DOM
+// (inputs del modal + leyenda del header). Se llama al cargar y tras guardar.
+function applySettings() {
+  document.getElementById('yellowThresh').value = settings.yellow;
+  document.getElementById('redThresh').value = settings.red;
+  document.getElementById('greenMax').textContent = settings.yellow;
+  document.getElementById('legGreen').textContent = settings.yellow;
+  document.getElementById('legYellow').textContent = settings.yellow;
+  document.getElementById('legRed').textContent = settings.red;
+  document.getElementById('legRedVal').textContent = settings.red;
+}
+applySettings();
+
+function openSettings() {
+  new bootstrap.Modal(document.getElementById('settingsModal')).show();
+}
+function saveSettings() {
+  // Ajuste TEMPORAL para esta pantalla (no persiste). La configuración global
+  // de umbrales la define el gerente en Configuración; al recargar el KDS se
+  // vuelven a tomar esos valores desde la BD.
+  settings.yellow = parseInt(document.getElementById('yellowThresh').value);
+  settings.red = parseInt(document.getElementById('redThresh').value);
+  applySettings();
+  updateTimers();
+  bootstrap.Modal.getInstance(document.getElementById('settingsModal')).hide();
+}
+
+// ─── Reloj del KDS ──────────────────────────────────────────────────────────
+// Muestra la hora local del dispositivo actualizada cada segundo en el header.
+function tickClock() {
+  const now = new Date();
+  document.getElementById('kds-clock').textContent = now.toLocaleTimeString('es-MX', { hour:'2-digit', minute:'2-digit' });
+}
+tickClock(); setInterval(tickClock, 1000);
+
+// ─── Timers de tickets ───────────────────────────────────────────────────────
+// timestamps: mapa { pedido_id → timestamp_ms } para calcular tiempo transcurrido.
+// Se inicializa con las tarjetas renderizadas por Django; el polling añade nuevas entradas.
+const timestamps = {};
+document.querySelectorAll('.kds-card').forEach(card => {
+  const ts = parseInt(card.dataset.ts) * 1000;
+  if (ts) timestamps[card.id.replace('ticket-','')] = ts;
+});
+
+// updateTimers: recorre todos los timestamps activos y actualiza el texto del
+// temporizador y la clase CSS del ticket (semáforo verde/amarillo/rojo).
+// Se ejecuta cada segundo para que el color cambie en el momento exacto.
+function updateTimers() {
+  const now = Date.now();
+  Object.entries(timestamps).forEach(([id, ts]) => {
+    const el = document.getElementById(`timer-${id}`);
+    const card = document.getElementById(`ticket-${id}`);
+    if (!el || !card) return;
+    const mins = Math.floor((now - ts) / 60000);
+    const secs = Math.floor(((now - ts) % 60000) / 1000);
+    el.textContent = `${mins}:${secs.toString().padStart(2,'0')}`;
+    // Aplicar clase de color según los umbrales del semáforo configurados
+    if (mins >= settings.red) {
+      el.className = 'kds-timer red'; card.className = 'kds-card red';
+    } else if (mins >= settings.yellow) {
+      el.className = 'kds-timer yellow'; card.className = 'kds-card yellow';
+    } else {
+      el.className = 'kds-timer green'; card.className = 'kds-card';
+    }
+  });
+}
+setInterval(updateTimers, 1000);
+updateTimers();
+
+// Avanzar pedido en el KDS del área actual.
+//  - "recibido" → "preparando": solo arranca; la tarjeta SIGUE en la columna.
+//  - "preparando": marca como listos los ítems de ESTA área. La tarjeta sale
+//    de la columna (su trabajo terminó); el pedido global solo queda "listo"
+//    cuando la otra área también termina.
+async function marcarListo(id, btn) {
+  btn.disabled = true;
+  const originalHTML = btn.innerHTML;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+  try {
+    const res = await fetch('{% url "cocina:marcar_listo" %}', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+      body: JSON.stringify({ pedido_id: id, area: AREA })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      const card = document.getElementById(`ticket-${id}`);
+      if (data.nuevo_estado === 'preparando' && !data.area_completa) {
+        // Recién se inició la preparación: la tarjeta permanece.
+        if (card) card.dataset.estado = 'preparando';
+        btn.innerHTML = '<i class="bi bi-check2-all me-2"></i>Marcar como Listo';
+        btn.disabled = false;
+        showToast('Preparación iniciada');
+      } else {
+        // Esta área terminó sus ítems: la tarjeta sale de la columna.
+        if (card) { delete timestamps[id]; card.remove(); }
+        showToast(
+          data.nuevo_estado === 'listo'
+            ? 'Pedido completo y listo'
+            : 'Tu área terminó — el pedido sigue en preparación (otra área)',
+        );
+      }
+      pollKDS();
+    } else {
+      showToast(data.error || 'Error al actualizar pedido', 'error');
+      btn.innerHTML = originalHTML;
+      btn.disabled = false;
+    }
+  } catch(e) {
+    showToast('Error de conexión', 'error');
+    btn.innerHTML = originalHTML;
+    btn.disabled = false;
+  }
+}
+
+// ─── Constructor de tarjetas (polling) ──────────────────────────────────────
+// buildCard: genera el HTML de una tarjeta de pedido nueva a partir del JSON
+// devuelto por pedidos_json. Mismo layout que el generado por Django en el template.
+function buildCard(p) {
+  const items = (p.detalles_filtrados || p.items || []).map(i => `
+    <div class="kds-item">
+      <div>
+        <span class="kds-item-qty">${i.cantidad}×</span>${i.nombre}
+        ${i.modificadores && i.modificadores.length ? `<div class="kds-item-mods">${i.modificadores.join(' · ')}</div>` : ''}
+        ${i.notas ? `<div class="kds-item-notes" style="color:#e74c3c; font-weight:600;"><i class="bi bi-exclamation-triangle-fill me-1"></i>${i.notas.toUpperCase()}</div>` : ''}
+      </div>
+    </div>`).join('');
+  const btnLabel = p.estado === 'recibido'
+    ? '<i class="bi bi-play-circle me-2"></i>Comenzar preparación'
+    : '<i class="bi bi-check2-all me-2"></i>Marcar como Listo';
+  const ts = Math.floor(new Date(p.fecha).getTime() / 1000);
+  return `<div class="kds-card" id="ticket-${p.id}" data-ts="${ts}" data-estado="${p.estado}">
+    <div class="kds-card-header">
+      <div class="d-flex align-items-center gap-2">
+        <span class="kds-table-badge">Mesa ${p.mesa}</span>
+        <span style="font-size:.8rem; color:#ccc;">${p.alias}</span>
+      </div>
+      <span class="kds-timer green" id="timer-${p.id}">0:00</span>
+    </div>
+    <div class="kds-items">${items}</div>
+    <button class="btn-listo" onclick="marcarListo(${p.id}, this)">${btnLabel}</button>
+  </div>`;
+}
+
+// ─── Polling del KDS ────────────────────────────────────────────────────────
+// pollKDS: solicita el estado actual al servidor cada 3 segundos y reconcilia
+// el DOM con la respuesta (añade/quita tarjetas sin recargar la página).
+//
+// Anti-solapamiento (_kdsPolling): si una petición tarda más de 3 s, la siguiente
+// invocación del setInterval la descarta en lugar de lanzar otra fetch paralela.
+//
+// Anti-regresión (_kdsLastTs): descarta respuestas con timestamp anterior al
+// último procesado (pueden llegar fuera de orden si la red es lenta).
+//
+// Pausa en pestaña inactiva: si el documento está oculto (visibilityState=hidden),
+// el polling se omite para no consumir recursos innecesariamente.
+// Llamada inicial + intervalo robusto con anti-solapamiento y pausa en pestaña inactiva
+let _kdsPolling = false;
+let _kdsLastTs  = 0;
+
+async function pollKDS() {
+  if (_kdsPolling) return;   // Evitar peticiones concurrentes
+  if (document.visibilityState === 'hidden') return;  // Pausa si pestaña inactiva
+  _kdsPolling = true;
+  try {
+    const res  = await fetch(`{% url "cocina:pedidos_json" %}?area=${AREA}`);
+    const data = await res.json();
+    const serverTs = data.ts || Date.now();
+    if (serverTs < _kdsLastTs) return;  // Respuesta tardía fuera de orden: ignorar
+    _kdsLastTs = serverTs;
+    if (!data.ok) return;
+
+    const pendCol = document.getElementById('pendingCol');
+    document.getElementById('pendCount').textContent = data.pendientes.length;
+    document.getElementById('doneCount').textContent = data.listos.length;
+
+    // Reconciliar columna de pendientes: añadir nuevas tarjetas o actualizar botón si cambió estado
+    data.pendientes.forEach(p => {
+      if (!document.getElementById(`ticket-${p.id}`)) {
+        // Tarjeta nueva: insertarla al inicio y registrar su timestamp para el semáforo
+        const ts = new Date(p.fecha).getTime();
+        timestamps[p.id] = ts || Date.now();
+        pendCol.insertAdjacentHTML('afterbegin', buildCard(p));
+      } else {
+        const card = document.getElementById(`ticket-${p.id}`);
+        if (card && card.dataset.estado !== p.estado) {
+          card.dataset.estado = p.estado;
+          const btn = card.querySelector('.btn-listo');
+          if (btn && !btn.disabled) {
+            btn.innerHTML = p.estado === 'recibido'
+              ? '<i class="bi bi-play-circle me-2"></i>Comenzar preparación'
+              : '<i class="bi bi-check2-all me-2"></i>Marcar como Listo';
+          }
+        }
+      }
+    });
+
+    // Eliminar del DOM tarjetas que ya no vienen en la respuesta (fueron marcadas
+    // listas por esta área u otra, o el pedido fue cancelado).
+    document.querySelectorAll('#pendingCol .kds-card').forEach(card => {
+      const id = parseInt(card.id.replace('ticket-',''));
+      if (!data.pendientes.find(p => p.id === id)) {
+        delete timestamps[id];  // Limpiar su entrada del mapa de timers
+        card.remove();
+      }
+    });
+
+    // Reconciliar columna de listos: añadir pedidos recién terminados y quitar
+    // los que ya fueron entregados (desaparecen del endpoint /pedidos-json/).
+    const doneCol = document.getElementById('doneCol');
+    data.listos.forEach(p => {
+      if (!document.getElementById(`done-${p.id}`)) {
+        // Eliminar estado vacío si estaba visible
+        const emptyDone = document.getElementById('doneEmpty');
+        if (emptyDone) emptyDone.remove();
+        // Pedido nuevo en la columna de listos: insertar tarjeta al final.
+        // Se muestran TODOS los ítems del pedido (no solo los del área).
+        const items = (p.detalles_filtrados || p.items || [])
+          .map(i => `${i.cantidad}× ${i.nombre}`).join(', ');
+        doneCol.insertAdjacentHTML('beforeend', `
+          <div style="background:#1e1e1e;border-radius:var(--radius-sm);padding:.75rem 1rem;border-left:3px solid var(--kds-green);margin-bottom:.5rem;" id="done-${p.id}">
+            <div class="d-flex align-items-center justify-content-between mb-1">
+              <div class="d-flex gap-2">
+                <span class="kds-table-badge">Mesa ${p.mesa}</span>
+                <span style="font-size:.8rem;color:#aaa;">${p.alias}</span>
+              </div>
+              <i class="bi bi-check-circle-fill" style="color:var(--kds-green);"></i>
+            </div>
+            <div style="font-size:.8rem;color:#888;">${items}</div>
+            <div style="font-size:.72rem;color:#555;margin-top:.25rem;">El mesero registra la entrega desde su panel</div>
+          </div>`);
+      }
+    });
+    // Quitar de la columna de listos los pedidos que ya no están en el endpoint
+    // (el mesero los entregó y el estado cambió a "entregado").
+    document.querySelectorAll('#doneCol [id^="done-"]').forEach(card => {
+      const id = parseInt(card.id.replace('done-',''));
+      if (!data.listos.find(p => p.id === id)) card.remove();
+    });
+    // Si la columna quedó vacía, mostrar el estado vacío
+    if (data.listos.length === 0 && !document.getElementById('doneEmpty')) {
+      doneCol.insertAdjacentHTML('beforeend', `
+        <div class="text-center py-5 kds-empty-state" id="doneEmpty" style="color:#555;">
+          <i class="bi bi-bowl" style="font-size:2rem;margin-bottom:.5rem;display:block;"></i>
+          <div style="font-size:.875rem;">Nada listo aún</div>
+        </div>`);
+    }
+    // Manejar estado vacío de la columna de pendientes
+    if (data.pendientes.length === 0 && !document.getElementById('pendingEmpty')) {
+      const emptyPend = document.createElement('div');
+      emptyPend.id = 'pendingEmpty';
+      emptyPend.className = 'text-center py-5 kds-empty-state';
+      emptyPend.style.color = '#555';
+      emptyPend.innerHTML = '<i class="bi bi-check-circle-fill" style="font-size:2.5rem;margin-bottom:.75rem;display:block;"></i><div style="font-size:.875rem;">Sin pedidos pendientes</div>';
+      pendCol.appendChild(emptyPend);
+    } else if (data.pendientes.length > 0) {
+      const emptyPend = document.getElementById('pendingEmpty');
+      if (emptyPend) emptyPend.remove();
+    }
+    updateTimers();
+  } catch(e) { console.warn('pollKDS error:', e); }
+  finally { _kdsPolling = false; }
+}
+
+// Polling inicial al cargar el DOM y cada 3 segundos después.
+// Al volver a pestaña activa (visibilitychange) se hace un poll inmediato
+// para sincronizar el estado que pudo cambiar mientras estuvo oculta.
+document.addEventListener('DOMContentLoaded', () => pollKDS());
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') pollKDS();
+});
+setInterval(pollKDS, 3000);
+</script>
+</body>
+</html>

@@ -1,0 +1,1579 @@
+{% extends "base/staff_base.html" %}
+{% load static %}
+{% comment %}Plantilla principal del panel del mesero. Sirve para tres vistas distintas
+   controladas por la variable de contexto `vista`:
+     - (vacío)    → Mapa de mesas en tiempo real con panel lateral de detalle.
+     - 'listos'   → Listado de pedidos listos para entregar.
+     - 'alertas'  → Solicitudes de atención y de cobro pendientes.
+   Los modales de pedido asistido, pago, cancelación y edición están siempre
+   presentes en el DOM y se activan desde cualquier vista via JS.{% endcomment %}
+
+{% block title %}Mapa de Mesas{% endblock %}
+{# Título dinámico del topbar según la vista activa #}
+{% block page_title %}
+  {% if vista == 'listos' %}Pedidos Listos{% elif vista == 'alertas' %}Alertas{% else %}Mapa de Mesas{% endif %}
+{% endblock %}
+
+{# ── Navegación lateral: enlaces de las cuatro secciones principales ── #}
+{% block sidebar_nav %}
+<a href="{% url 'mesero:mapa_mesas' %}" {% if not vista %}class="active"{% endif %}><i class="bi bi-grid-fill"></i> Mesas</a>
+<a href="{% url 'mesero:pedidos_listos' %}" {% if vista == 'listos' %}class="active"{% endif %}>
+  <i class="bi bi-bag-check-fill"></i> Pedidos listos
+  {# Badge numérico actualizado por pollMesas() sin recargar la página #}
+  <span class="badge-alert" id="nav-listos-badge" {% if not listos_count %}style="display:none"{% endif %}>{{ listos_count }}</span>
+</a>
+<a href="{% url 'mesero:pedido_asistido' %}" {% if vista == 'asistido' %}class="active"{% endif %}><i class="bi bi-plus-circle"></i> Pedido asistido</a>
+<a href="{% url 'mesero:alertas' %}" {% if vista == 'alertas' %}class="active"{% endif %}><i class="bi bi-bell-fill"></i> Alertas</a>
+{% endblock %}
+
+{# ── Acciones del topbar: botones de acceso rápido a listos y solicitudes ── #}
+{% block topbar_actions %}
+<a href="{% url 'mesero:pedidos_listos' %}" id="topbar-listos-btn" class="btn btn-sm rounded-pill px-3"
+   style="background:var(--mm-green-pale); color:var(--mm-green); font-size:.78rem; text-decoration:none; {% if not listos_count %}display:none{% endif %}">
+  <i class="bi bi-check2-circle me-1"></i><span id="topbar-listos-txt">{{ listos_count }}</span> listos para entregar
+</a>
+{% if solicitudes_count > 0 %}
+<a href="{% url 'mesero:alertas' %}" class="btn btn-sm rounded-pill px-3"
+   style="background:#FDEDEC; color:var(--mm-danger); font-size:.78rem; text-decoration:none;">
+  <i class="bi bi-bell-fill me-1"></i>{{ solicitudes_count }} solicitudes
+</a>
+{% endif %}
+{% endblock %}
+
+{% block content %}
+
+{% comment %}═══════════════════════ VISTA: PEDIDOS LISTOS ═══════════════════════
+   Muestra tarjetas de pedidos en estado 'listo' listos para servir al cliente.
+   El mesero puede marcar cada pedido como entregado directamente desde aquí.
+   ════════════════════════════════════════════════════════════════════════{% endcomment %}
+{# ═══════════════════════ VISTA: PEDIDOS LISTOS ═══════════════════════ #}
+{% if vista == 'listos' %}
+<div class="d-flex align-items-center justify-content-between mb-3">
+  <h5 class="fw-bold mb-0">Pedidos listos para entregar</h5>
+  <a href="{% url 'mesero:mapa_mesas' %}" class="btn btn-sm" style="background:var(--mm-cream-dark);">
+    <i class="bi bi-arrow-left me-1"></i>Volver al mapa
+  </a>
+</div>
+{% if pedidos_listos %}
+<div class="row g-3">
+  {% for pedido in pedidos_listos %}
+  <div class="col-md-6 col-lg-4" id="listos-card-{{ pedido.pk }}">
+    <div style="border:2px solid var(--mm-green); border-radius:var(--radius-md); background:var(--mm-white); padding:1.25rem;">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <div>
+          <span class="fw-bold" style="font-size:1rem;">Mesa {{ pedido.sesion.mesa.numero_mesa }}</span>
+          <span style="font-size:.8rem; color:var(--mm-text-muted); margin-left:.5rem;">{{ pedido.sesion.alias }}</span>
+        </div>
+        <span style="background:#EAFAF1; color:#1E8449; border-radius:99px; padding:.2rem .7rem; font-size:.75rem; font-weight:700;">
+          <i class="bi bi-check-circle-fill me-1"></i>Listo
+        </span>
+      </div>
+      <div class="mb-3">
+        {% for d in pedido.detalles.all %}
+        <div style="font-size:.875rem; padding:.25rem 0; border-bottom:1px solid var(--mm-border); display:flex; justify-content:space-between;">
+          <span>{{ d.cantidad }}× {{ d.producto.nombre }}</span>
+          <span style="color:var(--mm-text-muted);">${{ d.subtotal_calculado|floatformat:2 }}</span>
+        </div>
+        {% endfor %}
+      </div>
+      <button class="btn btn-primary w-100 rounded-3 py-2 fw-bold" onclick="entregarPedido({{ pedido.pk }}, this)">
+        <i class="bi bi-check2 me-2"></i>Marcar como entregado
+      </button>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="text-center py-5" style="color:var(--mm-text-muted);">
+  <i class="bi bi-check-circle-fill" style="font-size:3rem; margin-bottom:1rem; display:block; color:var(--mm-green);"></i>
+  <h6 class="fw-bold">No hay pedidos listos por entregar</h6>
+  <p style="font-size:.875rem;">Todos los pedidos han sido entregados</p>
+  <a href="{% url 'mesero:mapa_mesas' %}" class="btn btn-primary mt-2">Ver mapa de mesas</a>
+</div>
+{% endif %}
+
+{% comment %}═══════════════════════ VISTA: ALERTAS ════════════════════════
+   Dos secciones:
+     1. Solicitudes de atención (AlertaMesero): cliente pide ayuda del mesero.
+     2. Solicitudes de cobro (SolicitudPago pendientes): cliente o mesero
+        solicitó la cuenta; el botón "Ir a cobrar" abre el modal de pago.
+   ════════════════════════════════════════════════════════════════{% endcomment %}
+{# ═══════════════════════ VISTA: ALERTAS ═══════════════════════ #}
+{% elif vista == 'alertas' %}
+<div class="d-flex align-items-center justify-content-between mb-3">
+  <h5 class="fw-bold mb-0"><i class="bi bi-bell-fill me-2" style="color:var(--mm-danger);"></i>Alertas y solicitudes</h5>
+  <a href="{% url 'mesero:mapa_mesas' %}" class="btn btn-sm" style="background:var(--mm-cream-dark);">
+    <i class="bi bi-arrow-left me-1"></i>Volver al mapa
+  </a>
+</div>
+<h6 class="fw-bold mb-2 mt-1" style="font-size:.85rem; text-transform:uppercase; letter-spacing:.05em; color:var(--mm-text-muted);">
+  <i class="bi bi-hand-raised-fill me-1" style="color:var(--mm-danger);"></i>Solicitudes de atención
+</h6>
+{% if alertas_ayuda %}
+<div class="row g-2 mb-4">
+  {% for alerta in alertas_ayuda %}
+  <div class="col-md-6 col-lg-4" id="alerta-{{ alerta.pk }}">
+    <div style="border:2px solid var(--mm-danger); border-radius:var(--radius-md); background:var(--mm-white); padding:1rem;">
+      <div class="d-flex justify-content-between align-items-start mb-2">
+        <div>
+          <span class="fw-bold" style="font-size:.95rem;">Mesa {{ alerta.mesa.numero_mesa }}</span>
+          {% if alerta.sesion %}<span style="font-size:.8rem; color:var(--mm-text-muted); margin-left:.4rem;">{{ alerta.sesion.alias }}</span>{% endif %}
+        </div>
+        <span style="font-size:.72rem; color:var(--mm-text-muted);">{{ alerta.fecha_creacion|time:"H:i" }}</span>
+      </div>
+      {% if alerta.mensaje %}<p style="font-size:.85rem; margin:.25rem 0 .75rem; color:#444;">{{ alerta.mensaje }}</p>{% endif %}
+      <button class="btn btn-sm w-100 fw-semibold" style="background:var(--mm-danger); color:#fff;" onclick="atenderAlerta({{ alerta.pk }}, this)">
+        <i class="bi bi-check2 me-1"></i>Marcar como atendida
+      </button>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="text-center py-4 mb-4" style="background:var(--mm-cream); border-radius:var(--radius-md); color:var(--mm-text-muted);">
+  <i class="bi bi-hand-thumbs-up-fill" style="font-size:2rem; color:var(--mm-green);"></i>
+  <p style="font-size:.85rem; margin:.5rem 0 0;">Sin solicitudes de atención pendientes</p>
+</div>
+{% endif %}
+<h6 class="fw-bold mb-2" style="font-size:.85rem; text-transform:uppercase; letter-spacing:.05em; color:var(--mm-text-muted);">
+  <i class="bi bi-receipt me-1" style="color:var(--mm-gold);"></i>Solicitudes de cobro
+</h6>
+{% if solicitudes %}
+<div class="row g-2">
+  {% for sol in solicitudes %}
+  <div class="col-md-6 col-lg-4">
+    <div style="border:2px solid var(--mm-gold); border-radius:var(--radius-md); background:var(--mm-white); padding:1rem;">
+      <div class="d-flex justify-content-between align-items-start mb-1">
+        <span class="fw-bold" style="font-size:.95rem;">Mesa {{ sol.mesa.numero_mesa }}</span>
+        <span style="font-size:.72rem; color:var(--mm-text-muted);">{{ sol.fecha_hora|time:"H:i" }}</span>
+      </div>
+      {% if sol.tipo == 'grupal' %}
+        <div style="font-size:.8rem; color:var(--mm-text-muted); margin-bottom:.5rem;"><i class="bi bi-people-fill me-1"></i>Toda la mesa</div>
+      {% elif sol.sesion %}
+        <div style="font-size:.8rem; color:var(--mm-text-muted); margin-bottom:.5rem;">{{ sol.sesion.alias }}</div>
+      {% endif %}
+      <div style="font-size:.85rem; margin-bottom:.75rem;">
+        <span class="badge rounded-pill" style="background:var(--mm-cream-dark); color:#333;">{{ sol.get_tipo_display }}</span>
+        {% comment %}BUGFIX (problema 3): grupal SIEMPRE usa total_mesa. Antes el filtro
+           default caía a total_individual del solicitante y se "perdían" los
+           productos de las demás sesiones.{% endcomment %}
+        {% if sol.tipo == 'grupal' %}
+          <span class="fw-bold ms-2">${{ sol.total_mesa|default_if_none:0|floatformat:2 }}</span>
+        {% else %}
+          <span class="fw-bold ms-2">${{ sol.total_individual|default_if_none:0|floatformat:2 }}</span>
+        {% endif %}
+        {% if sol.detalle_pago %}<span class="badge ms-1" style="background:var(--mm-green-pale); color:var(--mm-green); font-size:.72rem;">{{ sol.detalle_pago }}</span>{% endif %}
+      </div>
+      {% comment %}BUGFIX (problema 1): para grupal se pasa sesionId=null para que el
+         backend cierre TODAS las sesiones de la mesa, no solo una.{% endcomment %}
+      {% if sol.tipo == 'grupal' %}
+      <button onclick="abrirPago({{ sol.mesa_id }}, {{ sol.total_mesa|default_if_none:0 }}, null, '{{ sol.detalle_pago|default:"" }}')" class="btn btn-sm w-100 fw-semibold" style="background:var(--mm-gold); color:#fff;">
+        <i class="bi bi-cash-coin me-1"></i>Cobrar toda la mesa
+      </button>
+      {% else %}
+      <button onclick="abrirPago({{ sol.mesa_id }}, {{ sol.total_individual|default_if_none:0 }}, {% if sol.sesion %}{{ sol.sesion_id }}{% else %}null{% endif %}, '{{ sol.detalle_pago|default:"" }}')" class="btn btn-sm w-100 fw-semibold" style="background:var(--mm-gold); color:#fff;">
+        <i class="bi bi-cash-coin me-1"></i>Ir a cobrar
+      </button>
+      {% endif %}
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="text-center py-4" style="background:var(--mm-cream); border-radius:var(--radius-md); color:var(--mm-text-muted);">
+  <i class="bi bi-bell-fill" style="font-size:2rem; color:var(--mm-text-muted);"></i>
+  <p style="font-size:.85rem; margin:.5rem 0 0;">Sin solicitudes de cobro pendientes</p>
+</div>
+{% endif %}
+
+{% comment %}═══════════════════════ VISTA: MAPA (default) ════════════════════════
+   Layout de dos columnas: grid de mesas (izquierda) + panel lateral (derecha).
+   El grid muestra un tile por mesa; el estado visual se actualiza por polling
+   cada 3 s vía pollMesas() sin recargar la página.
+   El panel lateral aparece al hacer clic en una mesa y muestra sus sesiones,
+   pedidos, solicitudes de cobro y un resumen económico via 4 pestañas.
+   ════════════════════════════════════════════════════════════════════════{% endcomment %}
+{# ═══════════════════════ VISTA: MAPA (default) ═══════════════════════ #}
+{% else %}
+<div class="d-flex gap-3" style="height:calc(100vh - 56px - 3rem); overflow:hidden;">
+  <div class="flex-grow-1 overflow-y-auto">
+    <div class="d-flex align-items-center justify-content-between mb-3">
+      <div>
+        <h5 class="fw-bold mb-0">Mapa de Mesas</h5>
+        <p style="font-size:.8rem; color:var(--mm-text-muted); margin:0;" id="mesasSummary">Cargando…</p>
+      </div>
+    </div>
+    {# ── Leyenda de colores del mapa de mesas ── #}
+    <div class="d-flex gap-3 mb-3 flex-wrap">
+      <span style="font-size:.75rem; color:var(--mm-text-muted); display:flex; align-items:center; gap:.35rem;"><span style="width:10px;height:10px;border-radius:50%;background:#ccc;display:inline-block;"></span>Libre</span>
+      <span style="font-size:.75rem; color:var(--mm-text-muted); display:flex; align-items:center; gap:.35rem;"><span style="width:10px;height:10px;border-radius:50%;background:var(--mm-info);display:inline-block;"></span>Ocupada</span>
+      <span style="font-size:.75rem; color:var(--mm-text-muted); display:flex; align-items:center; gap:.35rem;"><span style="width:10px;height:10px;border-radius:50%;background:var(--mm-gold);display:inline-block;"></span>En cocina</span>
+      <span style="font-size:.75rem; color:var(--mm-text-muted); display:flex; align-items:center; gap:.35rem;"><span style="width:10px;height:10px;border-radius:50%;background:var(--mm-green);display:inline-block;"></span>Listo/Cobrando</span>
+      <span style="font-size:.75rem; color:var(--mm-text-muted); display:flex; align-items:center; gap:.35rem;"><span style="width:10px;height:10px;border-radius:50%;background:var(--mm-danger);display:inline-block;"></span>¡Atención!</span>
+    </div>
+    {% comment %}── Grid de tiles de mesas. El estado inicial es 'libre'; pollMesas()
+       actualiza clase CSS, color del dot y etiqueta cada 3 segundos. ──{% endcomment %}
+    <div class="table-grid" id="mesasGrid">
+      {% for mesa in mesas %}
+      <div class="mesa-tile libre" id="mesa-tile-{{ mesa.pk }}" onclick="selectMesa({{ mesa.pk }}, {{ mesa.numero_mesa }})">
+        <div class="mesa-dot"></div>
+        <div class="mesa-num">{{ mesa.numero_mesa }}</div>
+        <div class="mesa-label">Libre</div>
+        <div style="font-size:.65rem; color:var(--mm-text-muted); margin-top:.2rem;"><i class="bi bi-people" style="font-size:.65rem;"></i> 0</div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  {% comment %}── Panel lateral de detalle de mesa ─────────────────────────────────────
+     Se muestra al seleccionar una mesa del grid. Contiene:
+       - Header con número, estado (badge) y PIN actual.
+       - 4 pestañas: Sesiones / Pedidos / Solicitudes / Resumen.
+       - Botón "Cerrar mesa" (visible solo si la mesa está ocupada).
+     El contenido de cada pestaña se genera dinámicamente por renderTab()
+     con datos de la última llamada a detalle_mesa() (vía selectMesa).
+   ──────────────────────────────────────────────────────────────────────────{% endcomment %}
+  <!-- Side Panel -->
+  <div id="mesaPanel" style="width:380px; flex-shrink:0; background:var(--mm-white); border:1px solid var(--mm-border); border-radius:var(--radius-md); overflow:hidden; display:none; flex-direction:column;">
+    <div id="panelHeader" style="padding:1rem 1.25rem; border-bottom:1px solid var(--mm-border);">
+      <div class="d-flex align-items-center justify-content-between">
+        <div>
+          <h6 class="fw-bold mb-0" id="panelTitle">Mesa —</h6>
+          <span class="badge rounded-pill mt-1" id="panelEstado" style="font-size:.7rem;"></span>
+        </div>
+        <button class="btn btn-link p-0" onclick="closePanel()" style="color:var(--mm-text-muted);"><i class="bi bi-x-lg"></i></button>
+      </div>
+      <div class="mesa-panel-pin mt-2" id="panelPin" style="display:none;"></div>
+      <div id="panelNotaCierre" class="mt-2"
+           style="display:none; font-size:.75rem; background:#FEF9E7; color:#7D6608;
+                  border:1px solid #F4D03F; border-radius:.4rem; padding:.4rem .55rem; line-height:1.25;">
+      </div>
+    </div>
+    <div style="display:flex; border-bottom:1px solid var(--mm-border);">
+      <button class="panel-tab active" data-tab="sesiones" onclick="switchTab('sesiones')" style="flex:1; padding:.6rem; font-size:.8rem; font-weight:600; border:none; background:none; cursor:pointer; border-bottom:2px solid transparent; color:var(--mm-text-muted);">Sesiones</button>
+      <button class="panel-tab" data-tab="pedidos" onclick="switchTab('pedidos')" style="flex:1; padding:.6rem; font-size:.8rem; font-weight:600; border:none; background:none; cursor:pointer; border-bottom:2px solid transparent; color:var(--mm-text-muted);">Pedidos</button>
+      <button class="panel-tab" data-tab="solicitudes" onclick="switchTab('solicitudes')" style="flex:1; padding:.6rem; font-size:.8rem; font-weight:600; border:none; background:none; cursor:pointer; border-bottom:2px solid transparent; color:var(--mm-text-muted);">Solicitudes</button>
+      <button class="panel-tab" data-tab="resumen" onclick="switchTab('resumen')" style="flex:1; padding:.6rem; font-size:.8rem; font-weight:600; border:none; background:none; cursor:pointer; border-bottom:2px solid transparent; color:var(--mm-text-muted);">Resumen</button>
+    </div>
+    <div style="flex:1; overflow-y:auto; padding:1rem;" id="panelContent">
+      <div style="text-align:center; padding:2rem; color:var(--mm-text-muted);">
+        <div style="font-size:2rem;">🪑</div>
+        <p style="font-size:.85rem; margin-top:.5rem;">Selecciona una mesa</p>
+      </div>
+    </div>
+    <div style="padding:.75rem 1rem; border-top:1px solid var(--mm-border);">
+      <button class="btn btn-outline-danger w-100 btn-sm rounded-3" id="btnCerrarMesa" onclick="cerrarMesa()" style="display:none;">
+        <i class="bi bi-door-closed me-1"></i>Cerrar mesa
+      </button>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+{% comment %}── Modales globales ─────────────────────────────────────────────────────────
+   Los siguientes modales están siempre en el DOM y se activan por JS desde
+   cualquiera de las tres vistas. Se inicializan con Bootstrap 5 Modal API.
+   ────────────────────────────────────────────────────────────────────────────{% endcomment %}
+
+{# ── Modal: alta de cliente en mesa ocupada (crea SesionCliente asistida) ── #}
+<!-- ═══ MODAL: Agregar cliente a mesa ══════════════════════════════════ -->
+<div class="modal fade" id="agregarClienteModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered" style="max-width:360px;">
+    <div class="modal-content rounded-4 border-0">
+      <div class="modal-body p-4">
+        <h5 class="fw-bold mb-1"><i class="bi bi-person-plus me-2" style="color:var(--mm-green);"></i>Agregar cliente</h5>
+        <p style="font-size:.875rem; color:var(--mm-text-muted); margin-bottom:1.25rem;">Ingresa el nombre o alias del cliente.</p>
+        <input type="hidden" id="agregarClienteMesaId">
+        <div class="mb-4">
+          <label class="form-label fw-semibold" style="font-size:.875rem;">Alias / Nombre <span class="text-danger">*</span></label>
+          <input type="text" id="agregarClienteAlias" maxlength="50" data-upper class="form-control rounded-3" placeholder="ej. Juan, Familia García..." style="border-color:var(--mm-border);">
+        </div>
+        <button class="btn btn-primary w-100 py-2 fw-bold" onclick="confirmarAgregarCliente()">
+          <i class="bi bi-check2 me-2"></i>Agregar cliente
+        </button>
+        <button class="btn w-100 py-2 mt-2" style="background:var(--mm-cream-dark);" data-bs-dismiss="modal">Cancelar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{# ── Modal: cancelar pedido (requiere motivo obligatorio para auditoría) ── #}
+<!-- ═══ MODAL: Cancelar pedido ════════════════════════════════════════ -->
+<div class="modal fade" id="cancelarModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered" style="max-width:380px;">
+    <div class="modal-content rounded-4 border-0">
+      <div class="modal-body p-4">
+        <h5 class="fw-bold mb-1 text-danger"><i class="bi bi-x-circle me-2"></i>Cancelar pedido</h5>
+        <p style="font-size:.875rem; color:var(--mm-text-muted); margin-bottom:1rem;">Ingresa el motivo.</p>
+        <input type="hidden" id="cancelarPedidoId">
+        <div class="mb-4">
+          <label class="form-label fw-semibold" style="font-size:.875rem;">Motivo <span class="text-danger">*</span></label>
+          <textarea id="cancelarMotivo" data-upper class="form-control rounded-3" rows="3" placeholder="ej. Cliente cambió de opinión..." style="border-color:var(--mm-border);"></textarea>
+        </div>
+        <button class="btn btn-danger w-100 py-2 fw-bold" onclick="confirmarCancelacion()">Confirmar cancelación</button>
+        <button class="btn w-100 py-2 mt-2" style="background:var(--mm-cream-dark);" data-bs-dismiss="modal">Volver</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% comment %}── Modal: pedido asistido ───────────────────────────────────────────────────
+   Flujo interno:
+     1. Selector de productos (grid con precio) → asistidoProductsContainer.
+     2. Detalle del producto seleccionado con grupos de modificadores
+        (radio/checkbox según tipo 'única'/'múltiple') → asistidoProductDetail.
+     3. Resumen del carrito + selector de promoción → asistidoCartSummary.
+   El carrito es un array JS (asistidoCart). Al confirmar, se envía a
+   confirmar_pedido_asistido con un token de idempotencia (P1).
+   ────────────────────────────────────────────────────────────────────────────{% endcomment %}
+<!-- ═══ MODAL: Pedido Asistido con modificadores ══════════════════════ -->
+<div class="modal fade" id="asistidoModal" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content rounded-4 border-0">
+      <div class="modal-header border-0 pb-0">
+        <div>
+          <h5 class="modal-title fw-bold" id="asistidoTitle">Pedido asistido</h5>
+          <p class="mb-0" id="asistidoSubtitle" style="font-size:.85rem; color:var(--mm-text-muted);"></p>
+        </div>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body pt-2">
+        {# Paso 1: grid de productos cargado via fetch a productos_json #}
+        <!-- Selector de productos -->
+        <div id="asistidoProductsContainer"></div>
+
+        {# Paso 2: formulario de configuración del ítem seleccionado #}
+        <!-- Detalle del producto seleccionado -->
+        <div id="asistidoProductDetail" style="display:none;">
+          <button class="btn btn-sm mb-3" style="background:var(--mm-cream-dark);" onclick="volverAProductos()">
+            <i class="bi bi-arrow-left me-1"></i>Volver
+          </button>
+          <div class="d-flex align-items-start gap-3 mb-3">
+            <div style="flex:1;">
+              <h6 class="fw-bold mb-0" id="detailNombre"></h6>
+              <div id="detailPrecioBase" style="color:var(--mm-green); font-weight:700; font-size:1.1rem;"></div>
+            </div>
+            <div class="d-flex align-items-center gap-2">
+              <button class="btn btn-sm rounded-circle" style="background:var(--mm-cream-dark); width:32px; height:32px; padding:0;" onclick="changeAsistidoQty(-1)">−</button>
+              <span id="detailQty" style="font-weight:700; font-size:1.1rem; min-width:24px; text-align:center;">1</span>
+              <button class="btn btn-sm rounded-circle" style="background:var(--mm-green); color:#fff; width:32px; height:32px; padding:0;" onclick="changeAsistidoQty(1)">+</button>
+            </div>
+          </div>
+          <div id="detailGrupos"></div>
+          <div class="mb-3">
+            <label class="form-label fw-semibold" style="font-size:.85rem;">Notas especiales</label>
+            <input type="text" id="detailNotas" data-upper class="form-control rounded-3" placeholder="Sin cebolla, extra picante..." style="border-color:var(--mm-border);">
+          </div>
+          <div class="d-flex justify-content-between align-items-center mb-3 p-3 rounded-3" style="background:var(--mm-cream);">
+            <span class="fw-semibold">Subtotal</span>
+            <span class="fw-bold" id="detailSubtotal" style="font-size:1.1rem; color:var(--mm-green);">$0.00</span>
+          </div>
+          <button class="btn btn-primary w-100 py-2 fw-bold" onclick="addToCartAsistido()">
+            <i class="bi bi-plus-circle me-2"></i>Agregar al pedido
+          </button>
+        </div>
+
+        {# Paso 3: resumen del carrito con total y selector de promoción #}
+        <!-- Resumen del carrito -->
+        <div id="asistidoCartSummary" style="display:none; margin-top:1rem; padding-top:1rem; border-top:1px solid var(--mm-border);">
+          <h6 class="fw-bold mb-2">Pedido actual</h6>
+          <div id="asistidoCartItems"></div>
+
+          <!-- Selector de promoción (aparece si hay promos elegibles) -->
+          <div id="asistidoPromoBox" style="display:none; margin-top:.75rem; padding:.65rem .75rem; background:var(--mm-green-pale); border-radius:var(--radius-sm);">
+            <div class="fw-semibold mb-1" style="font-size:.8rem; color:var(--mm-green);">
+              <i class="bi bi-tag-fill me-1"></i>Promoción aplicable
+            </div>
+            <div id="asistidoPromoOpciones" style="font-size:.82rem;"></div>
+          </div>
+
+          <div class="d-flex justify-content-between fw-bold mt-2 pt-2" style="border-top:1px solid var(--mm-border);">
+            <span>Total</span><span id="asistidoTotal" style="color:var(--mm-green);">$0.00</span>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer border-0 pt-0">
+        <button class="btn btn-primary px-4 py-2 fw-bold" onclick="confirmarAsistido()" id="btnConfirmarAsistido" disabled>
+          <i class="bi bi-send me-2"></i>Enviar a cocina
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{# ── Modal: confirmación de cancelación de solicitud de cobro ── #}
+<!-- ═══ MODAL: Cancelar solicitud de pago ════════════════════════════ -->
+<div class="modal fade" id="modalCancelarSolicitud" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content" style="border-radius:var(--radius-md);border:none;">
+      <div class="modal-body p-4">
+        <h5 class="fw-bold mb-1 text-danger"><i class="bi bi-x-circle me-2"></i>Cancelar solicitud de pago</h5>
+        <p class="text-muted mb-3" style="font-size:.9rem;">¿Confirmas que deseas cancelar esta solicitud? La mesa permanecerá activa.</p>
+        <div class="d-flex gap-2 mt-3">
+          <button class="btn flex-grow-1 py-2 fw-semibold text-danger" style="background:#FDEDEC;" onclick="ejecutarCancelarSolicitud()">
+            <i class="bi bi-x-circle me-1"></i>Sí, cancelar
+          </button>
+          <button class="btn flex-grow-1 py-2" style="background:var(--mm-cream-dark);" data-bs-dismiss="modal">Volver</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{# ── Modal: editar pedido (solo en estado 'recibido', antes de cocina) ── #}
+<!-- ═══ MODAL: Editar pedido (mesero) ════════════════════════════════ -->
+<div class="modal fade" id="modalEditarPedido" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered modal-lg">
+    <div class="modal-content" style="border-radius:var(--radius-md);border:none;">
+      <div class="modal-header" style="border-bottom:1px solid var(--mm-border);">
+        <h5 class="fw-bold mb-0"><i class="bi bi-pencil me-2"></i>Editar pedido</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body p-4" id="editarPedidoBody">
+        <div class="text-center py-4"><span class="spinner-border"></span></div>
+      </div>
+      <div class="modal-footer" style="border-top:1px solid var(--mm-border);">
+        <button class="btn py-2 px-4" style="background:var(--mm-cream-dark);" data-bs-dismiss="modal">Cancelar</button>
+        <button class="btn py-2 px-4 fw-semibold" style="background:var(--mm-green);color:#fff;" onclick="guardarEdicionPedido()">
+          <i class="bi bi-check2 me-1"></i>Guardar cambios
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% comment %}── Modal: procesamiento de pago ────────────────────────────────────────────
+   Alternativa al formulario pago.html para cobrar sin salir del mapa.
+   Soporta Efectivo, Tarjeta, Mixto (PayPal excluido: lo gestiona el cliente).
+   Al abrirse refresca el total desde el backend (P2) para evitar montos stale.
+   El form se envía a procesar_pago y redirige al ticket al completar.
+   ────────────────────────────────────────────────────────────────────────────{% endcomment %}
+<!-- ═══ MODAL: Pago ══════════════════════════════════════════════════ -->
+<div class="modal fade" id="pagoModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered" style="max-width:420px;">
+    <div class="modal-content rounded-4 border-0">
+      <div class="modal-body p-4">
+        <h5 class="fw-bold mb-1">Procesar pago</h5>
+        <p style="font-size:.85rem; color:var(--mm-text-muted);" id="pagoSubtitle">Toda la mesa</p>
+
+        {# Desglose del total: subtotal + propina = total a cobrar #}
+        <!-- Desglose -->
+        <div style="background:var(--mm-cream); border-radius:var(--radius-sm); padding:.75rem 1rem; margin-bottom:1rem;">
+          <div class="d-flex justify-content-between" style="font-size:.85rem; color:var(--mm-text-muted);">
+            <span>Subtotal</span><span id="pagoSubtotalDisp">$0.00</span>
+          </div>
+          <div class="d-flex justify-content-between" id="pagoPropinaRow" style="font-size:.85rem; color:var(--mm-text-muted); display:none;">
+            <span>Propina</span><span id="pagoPropinaDisp">$0.00</span>
+          </div>
+          <div class="d-flex justify-content-between fw-bold" style="font-size:1.4rem; margin-top:.35rem; border-top:1px solid var(--mm-border); padding-top:.35rem;">
+            <span>Total</span><span id="pagoTotal">$0.00</span>
+          </div>
+        </div>
+
+        <p class="fw-semibold mb-2" style="font-size:.875rem;">Método de pago</p>
+        <div id="metodosContainer" class="mb-3"></div>
+
+        {% comment %}Selector de propina: botones rápidos por % + campo libre.
+           propinaInput.oninput dispara calcCambio() para actualizar el total.{% endcomment %}
+        <!-- Propina -->
+        <div class="mb-3">
+          <label class="fw-semibold mb-1 d-block" style="font-size:.875rem;">Propina</label>
+          <div class="d-flex gap-2 mb-2" id="propinaOpciones">
+            <button type="button" class="btn btn-sm propina-pct" style="background:var(--mm-cream-dark);border:none;font-size:.78rem;" onclick="setPropinaPct(0)">Sin propina</button>
+            <button type="button" class="btn btn-sm propina-pct" style="background:var(--mm-cream-dark);border:none;font-size:.78rem;" onclick="setPropinaPct(10)">10%</button>
+            <button type="button" class="btn btn-sm propina-pct" style="background:var(--mm-cream-dark);border:none;font-size:.78rem;" onclick="setPropinaPct(15)">15%</button>
+            <button type="button" class="btn btn-sm propina-pct" style="background:var(--mm-cream-dark);border:none;font-size:.78rem;" onclick="setPropinaPct(20)">20%</button>
+          </div>
+          <div class="input-group">
+            <span class="input-group-text" style="background:var(--mm-cream); border-color:var(--mm-border);">$</span>
+            <input type="number" id="propinaInput" class="form-control" placeholder="0.00" step="0.01" min="0" inputmode="decimal" oninput="calcCambio()">
+          </div>
+        </div>
+
+        {# Sección Efectivo: visible solo con método EFECTIVO activo #}
+        <!-- Efectivo: monto recibido -->
+        <div class="mb-3" id="pagoEfectivoSec">
+          <label class="form-label fw-semibold" style="font-size:.875rem;">Monto recibido</label>
+          <div class="input-group">
+            <span class="input-group-text" style="background:var(--mm-cream); border-color:var(--mm-border);">$</span>
+            <input type="number" id="montoRecibido" class="form-control" placeholder="0.00" step="0.01" inputmode="decimal" oninput="calcCambio()">
+          </div>
+          <div id="cambioDisplay" style="font-size:.875rem; color:var(--mm-success); margin-top:.35rem; display:none;"></div>
+          <div id="montoError" style="font-size:.8rem; color:#721c24; background:#FDEDEC; border-radius:6px; padding:.4rem .75rem; margin-top:.35rem; display:none;"></div>
+        </div>
+
+        {# Sección Mixto: visible solo con método MIXTO activo #}
+        <!-- Mixto: efectivo + tarjeta -->
+        <div class="mb-3" id="pagoMixtoSec" style="display:none;">
+          <div class="mb-2">
+            <label class="form-label fw-semibold mb-1" style="font-size:.875rem;"><i class="bi bi-cash me-1"></i>Monto en efectivo</label>
+            <div class="input-group">
+              <span class="input-group-text" style="background:var(--mm-cream); border-color:var(--mm-border);">$</span>
+              <input type="number" id="mixtoEfectivo" class="form-control" placeholder="0.00" step="0.01" inputmode="decimal" oninput="calcMixto()">
+            </div>
+          </div>
+          <div class="mb-1">
+            <label class="form-label fw-semibold mb-1" style="font-size:.875rem;"><i class="bi bi-credit-card me-1"></i>Monto en tarjeta</label>
+            <div class="input-group">
+              <span class="input-group-text" style="background:var(--mm-cream); border-color:var(--mm-border);">$</span>
+              <input type="number" id="mixtoTarjeta" class="form-control" placeholder="0.00" step="0.01" inputmode="decimal" oninput="calcMixto()">
+            </div>
+          </div>
+          <div id="mixtoInfo" style="font-size:.8rem; color:var(--mm-text-muted); margin-top:.35rem;"></div>
+          <div id="mixtoError" style="font-size:.8rem; color:#721c24; background:#FDEDEC; border-radius:6px; padding:.4rem .75rem; margin-top:.35rem; display:none;"></div>
+        </div>
+
+        {% comment %}Formulario oculto que se llena desde JS antes del submit:
+           los campos visibles (inputs de monto/propina) alimentan los hiddens
+           para que el backend reciba siempre los valores finales.{% endcomment %}
+        <form method="post" action="{% url 'mesero:procesar_pago' %}" id="pagoForm">
+          {% csrf_token %}
+          <input type="hidden" name="mesa_id" id="pagoMesaId">
+          <input type="hidden" name="metodo_pago_id" id="pagoMetodoId">
+          <input type="hidden" name="sesion_id" id="pagoSesionId">
+          <input type="hidden" name="monto_recibido" id="pagoMontoRecibido">
+          <input type="hidden" name="propina" id="pagoPropina">
+          <input type="hidden" name="monto_efectivo" id="pagoMontoEfectivo">
+          <input type="hidden" name="monto_tarjeta" id="pagoMontoTarjeta">
+          <button type="submit" class="btn btn-primary w-100 py-3 fw-bold" id="pagoSubmitBtn">Confirmar pago</button>
+        </form>
+        <button class="btn w-100 py-2 mt-2" style="background:var(--mm-cream-dark);" data-bs-dismiss="modal">Cancelar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+// Extrae el token CSRF de la cookie del navegador para usarlo en fetch POST
+function getCsrf() {
+  const c = document.cookie.match('(^|; )csrftoken=([^;]*)');
+  return c ? c[2] : '';
+}
+// Muestra un toast flotante en la esquina inferior derecha; se auto-elimina a los 3 s
+function showToast(msg, tipo='success') {
+  const t = document.createElement('div');
+  t.className = 'position-fixed bottom-0 end-0 m-3 p-3 rounded-3 shadow';
+  t.style.cssText = `background:${tipo==='success'?'#d4edda':'#f8d7da'};color:${tipo==='success'?'#155724':'#721c24'};z-index:9999;font-size:.875rem;`;
+  t.innerHTML = msg;
+  document.body.appendChild(t);
+  setTimeout(()=>t.remove(), 3000);
+}
+
+// ── Variables globales de estado ─────────────────────────────────────────────
+const CSRF = getCsrf();
+let currentMesaId = null;    // mesa actualmente seleccionada en el panel lateral
+let currentTab = 'sesiones'; // pestaña activa del panel
+let panelData = null;        // último JSON recibido de detalle_mesa()
+let asistidoSesionId = null; // sesión destinataria del pedido asistido en curso
+let asistidoCart = [];       // ítems del carrito asistido [{producto_id, nombre, ...}]
+let asistidoPromo = null;        // promocion_id elegida para el pedido asistido
+let asistidoPromoElegibles = []; // promos que aplican al carrito actual
+let currentProducto = null;  // producto abierto en el detalle del modal asistido
+let currentQty = 1;          // cantidad seleccionada en el detalle del modal asistido
+
+// ── ALERTAS ──────────────────────────────────────────────────────────────────
+// Marca una AlertaMesero como atendida y desvanece la tarjeta del DOM.
+// Deshabilita el botón para evitar doble-click; lo reactiva si hay error.
+async function atenderAlerta(alertaId, btn) {
+  btn.disabled = true;
+  try {
+    const res = await fetch('{% url "mesero:atender_alerta" %}', {
+      method:'POST', headers:{'Content-Type':'application/json','X-CSRFToken':CSRF},
+      body: JSON.stringify({alerta_id: alertaId})
+    });
+    if ((await res.json()).ok) {
+      const card = document.getElementById(`alerta-${alertaId}`);
+      if (card) { card.style.transition='opacity .3s'; card.style.opacity='0'; setTimeout(()=>card.remove(),300); }
+    } else btn.disabled = false;
+  } catch(e) { btn.disabled = false; }
+}
+
+// ── ESTADO VISUAL DE MESAS ───────────────────────────────────────────────────
+// Mapa de estado_visual (del backend) → clase CSS, etiqueta y color del dot.
+// pollMesas() usa este mapa para actualizar cada tile sin recargar la página.
+const estadoStyles = {
+  libre:   {cls:'libre',   label:'Libre',      dot:'#ccc'},
+  ocupada: {cls:'ocupada', label:'Ocupada',    dot:'var(--mm-info)'},
+  cocina:  {cls:'pedidos', label:'En cocina',  dot:'var(--mm-gold)'},
+  listo:   {cls:'ocupada', label:'Listo!',     dot:'var(--mm-green)'},
+  cobrando:{cls:'pagando', label:'Cobrando',   dot:'var(--mm-green)'},
+  alerta:  {cls:'alerta',  label:'¡Atención!', dot:'var(--mm-danger)'},
+};
+
+// ── PANEL LATERAL ─────────────────────────────────────────────────────────────
+// Carga el detalle de la mesa seleccionada y popula el panel lateral.
+// silent=true se usa en actualizaciones automáticas (polling) para no abrir
+// el panel si el mesero ya lo cerró.
+async function selectMesa(id, numero, silent=false) {
+  currentMesaId = id;
+  if (!silent) document.getElementById('mesaPanel').style.display = 'flex';
+  try {
+    const res = await fetch(`/mesero/mapa/${id}/`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    panelData = await res.json();
+    if (!panelData.ok) throw new Error(panelData.error || 'Error');
+    if (numero) document.getElementById('panelTitle').textContent = `Mesa ${panelData.numero_mesa}`;
+    const pin = document.getElementById('panelPin');
+    if (panelData.pin) { pin.style.display='block'; pin.textContent=panelData.pin; } else pin.style.display='none';
+    const eb = document.getElementById('panelEstado');
+    eb.textContent = panelData.mesa_libre ? 'Libre' : 'Ocupada';
+    eb.style.background = panelData.mesa_libre ? 'var(--mm-cream-dark)' : 'var(--mm-green-pale)';
+    eb.style.color = panelData.mesa_libre ? 'var(--mm-text-muted)' : 'var(--mm-green)';
+    const noteBox = document.getElementById('panelNotaCierre');
+    if (panelData.nota_cierre) {
+      noteBox.style.display = 'block';
+      noteBox.innerHTML = `<i class="bi bi-exclamation-triangle-fill me-1"></i><strong>Cierre pendiente:</strong> ${panelData.nota_cierre}`;
+    } else {
+      noteBox.style.display = 'none';
+    }
+    document.getElementById('btnCerrarMesa').style.display = panelData.mesa_libre ? 'none' : 'block';
+    renderTab(currentTab);
+  } catch(e) { console.error(e); showToast('Error al cargar mesa','error'); closePanel(); }
+}
+
+// Cierra el panel lateral y limpia el ID de mesa activa
+function closePanel() { document.getElementById('mesaPanel').style.display='none'; currentMesaId=null; }
+
+// Cambia la pestaña activa del panel y actualiza el subrayado verde
+function switchTab(tab) {
+  currentTab = tab;
+  document.querySelectorAll('.panel-tab').forEach(t => {
+    const active = t.dataset.tab === tab;
+    t.style.borderBottom = active ? '2px solid var(--mm-green)' : '2px solid transparent';
+    t.style.color = active ? 'var(--mm-green)' : 'var(--mm-text-muted)';
+  });
+  renderTab(tab);
+}
+
+// Colores de texto y fondo para los badges de estado de pedido
+const statusColors = {recibido:'#2471A3',preparando:'#CA8A04',listo:'#1E8449',entregado:'#566573',cancelado:'#C0392B'};
+const statusBg = {recibido:'#EBF3FD',preparando:'#FEF9E7',listo:'#EAFAF1',entregado:'#F2F3F4',cancelado:'#FDEDEC'};
+
+// Genera el HTML del contenido de la pestaña activa usando panelData (JSON de detalle_mesa).
+// Pestaña 'sesiones': lista sesiones con botones de pedido asistido / cuenta / cerrar.
+// Pestaña 'pedidos': todos los pedidos de la mesa con acciones según estado.
+// Pestaña 'solicitudes': solicitudes de cobro pendientes con botón "Procesar pago".
+// Pestaña 'resumen': total consumido, nº de sesiones y pedidos.
+function renderTab(tab) {
+  const content = document.getElementById('panelContent');
+  if (!panelData) return;
+  if (tab === 'sesiones') {
+    content.innerHTML = `
+      <button onclick="abrirAgregarCliente()" class="btn btn-sm w-100 mb-2 rounded-3" style="background:var(--mm-cream-dark);font-size:.85rem;border:none;padding:.5rem;">
+        <i class="bi bi-person-plus me-1"></i> Agregar cliente a la mesa
+      </button>
+      <button onclick="solicitarCuentaMesa(${panelData.mesa_id})" class="btn btn-sm w-100 mb-3 rounded-3" style="background:var(--mm-gold);color:#fff;font-size:.85rem;border:none;padding:.5rem;">
+        <i class="bi bi-receipt me-1"></i> Solicitar cuenta (mesa completa)
+      </button>
+      ${(panelData.sesiones||[]).map(s => `
+        <div style="border:1px solid var(--mm-border);border-radius:var(--radius-sm);padding:.75rem;margin-bottom:.75rem;">
+          <div class="d-flex align-items-center justify-content-between mb-2">
+            <div class="d-flex gap-2 align-items-center">
+              <div style="width:32px;height:32px;border-radius:50%;background:var(--mm-green);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;">${s.alias[0].toUpperCase()}</div>
+              <div><div style="font-weight:600;font-size:.875rem;">${s.alias}</div>
+              <div style="font-size:.75rem;color:var(--mm-text-muted);">${s.pedidos.length} pedidos · $${s.total.toFixed(2)}</div></div>
+            </div>
+          </div>
+          <div class="d-flex gap-2 mb-1">
+            <button class="btn btn-sm flex-grow-1 rounded-3" style="background:var(--mm-green);color:#fff;font-size:.78rem;border:none;" onclick="abrirAsistido(${s.id},'${s.alias}')">
+              <i class="bi bi-plus-circle me-1"></i>+ Pedido
+            </button>
+            <button class="btn btn-sm rounded-3" style="background:var(--mm-gold);color:#fff;font-size:.78rem;border:none;" onclick="solicitarCuentaSesion(${panelData.mesa_id},${s.id})">
+              <i class="bi bi-receipt me-1"></i>Cuenta
+            </button>
+            <button class="btn btn-sm rounded-3" style="background:var(--mm-cream-dark);color:var(--mm-danger);font-size:.78rem;border:none;" onclick="cerrarSesion(${s.id},'${s.alias}')">
+              <i class="bi bi-x-circle me-1"></i>Cerrar
+            </button>
+          </div>
+        </div>`).join('')}`;
+  } else if (tab === 'pedidos') {
+    const todos = (panelData.sesiones||[]).flatMap(s => s.pedidos.map(p=>({...p,alias:s.alias})));
+    content.innerHTML = todos.length ? todos.map(p => `
+      <div style="border:1px solid var(--mm-border);border-radius:var(--radius-sm);padding:.75rem;margin-bottom:.75rem;">
+        <div class="d-flex align-items-center justify-content-between mb-1">
+          <span style="font-weight:600;font-size:.875rem;">#${p.id} · ${p.alias} · ${p.fecha}</span>
+          <span style="background:${statusBg[p.estado]||'#f5f5f5'};color:${statusColors[p.estado]||'#333'};border-radius:99px;padding:.2rem .6rem;font-size:.7rem;font-weight:700;">${p.estado_display}</span>
+        </div>
+        ${p.items.map(i=>`<div style="font-size:.8rem;color:var(--mm-text-muted);">${i.cantidad}× ${i.nombre}</div>`).join('')}
+        <div class="d-flex gap-2 mt-2">
+          ${p.estado==='listo'?`<button class="btn btn-sm flex-grow-1 rounded-3" style="background:var(--mm-green);color:#fff;font-size:.78rem;border:none;" onclick="entregarPedido(${p.id},this)"><i class="bi bi-check2 me-1"></i>Entregado</button>`:''}
+          ${!['entregado','cancelado'].includes(p.estado)?`<button class="btn btn-sm rounded-3" style="background:#FDEDEC;color:var(--mm-danger);font-size:.78rem;border:none;" onclick="abrirCancelar(${p.id})"><i class="bi bi-x-circle me-1"></i>Cancelar</button>`:''}
+          ${p.estado==='recibido'?`<button class="btn btn-sm rounded-3" style="background:#EAF4FB;color:var(--mm-green);font-size:.78rem;border:none;" onclick="abrirEditarPedido(${p.id})"><i class="bi bi-pencil me-1"></i>Editar</button>`:''}
+        </div>
+      </div>`).join('') : '<div style="text-align:center;padding:2rem;color:var(--mm-text-muted);"><i class="bi bi-clipboard" style="font-size:2rem;"></i><p style="font-size:.85rem;margin-top:.5rem;">Sin pedidos</p></div>';
+  } else if (tab === 'solicitudes') {
+    content.innerHTML = (panelData.solicitudes||[]).length ?
+      panelData.solicitudes.map(s=>`
+        <div style="border:2px solid var(--mm-green);background:var(--mm-green-pale);border-radius:var(--radius-sm);padding:.75rem;margin-bottom:.75rem;">
+          <div class="d-flex justify-content-between mb-1">
+            <div>
+              <div style="font-weight:600;font-size:.875rem;">Solicitud de cuenta</div>
+              <div style="font-size:.75rem;color:var(--mm-text-muted);">${s.alias} · ${s.tipo_display} · ${s.fecha}</div>
+            </div>
+            <div style="text-align:right;">
+              <span style="font-weight:700;color:var(--mm-green);">$${s.total.toFixed(2)}</span>
+              ${s.metodo_pref ? `<div><span style="font-size:.7rem;background:var(--mm-white);color:var(--mm-green);border-radius:99px;padding:.1rem .45rem;display:inline-block;margin-top:.2rem;">${s.metodo_pref}</span></div>` : ''}
+            </div>
+          </div>
+          <div class="d-flex gap-2 mt-2">
+            <button class="btn btn-primary btn-sm flex-grow-1 rounded-3" onclick="abrirPago(${panelData.mesa_id},${s.total},${s.sesion_id||'null'},'${s.metodo_pref||''}')">
+              <i class="bi bi-cash-coin me-1"></i>Procesar pago
+            </button>
+            <button class="btn btn-sm rounded-3" style="background:#FDEDEC;color:var(--mm-danger);border:none;white-space:nowrap;" onclick="confirmarCancelarSolicitud(${s.id})">
+              <i class="bi bi-x-circle me-1"></i>Cancelar
+            </button>
+          </div>
+        </div>`).join('') :
+      '<div style="text-align:center;padding:2rem;color:var(--mm-text-muted);"><i class="bi bi-bell" style="font-size:2rem;"></i><p style="font-size:.85rem;margin-top:.5rem;">Sin solicitudes</p></div>';
+  } else if (tab === 'resumen') {
+    content.innerHTML = `
+      <div style="background:var(--mm-green-pale);border-radius:var(--radius-sm);padding:1rem;text-align:center;margin-bottom:1rem;">
+        <div style="font-size:.8rem;color:var(--mm-text-muted);">Total consumido</div>
+        <div style="font-size:1.75rem;font-weight:700;color:var(--mm-green);">$${(panelData.total_mesa||0).toFixed(2)}</div>
+      </div>
+      <div style="font-size:.85rem;color:var(--mm-text-muted);">
+        <div class="d-flex justify-content-between py-1" style="border-bottom:1px solid var(--mm-border);">
+          <span>Sesiones activas</span><span>${(panelData.sesiones||[]).length}</span>
+        </div>
+        <div class="d-flex justify-content-between py-1">
+          <span>Total pedidos</span><span>${(panelData.sesiones||[]).reduce((a,s)=>a+s.pedidos.length,0)}</span>
+        </div>
+      </div>`;
+  }
+}
+
+// ── ACCIONES DE MESA ─────────────────────────────────────────────────────────
+// Marca el pedido como entregado, anima y elimina la tarjeta del grid de listos,
+// actualiza los badges de listos en sidebar y topbar, y refresca el panel activo.
+async function entregarPedido(id, btn) {
+  if (btn) btn.disabled = true;
+  try {
+    const res = await fetch('{% url "mesero:entregar_pedido" %}', {
+      method:'POST', headers:{'Content-Type':'application/json','X-CSRFToken':CSRF},
+      body: JSON.stringify({pedido_id:id})
+    });
+    const d = await res.json();
+    if (d.ok) {
+      showToast('Pedido entregado','success');
+
+      const card = document.getElementById(`listos-card-${id}`);
+      if (card) {
+        card.style.transition = 'opacity .3s ease, transform .3s ease';
+        card.style.opacity = '0';
+        card.style.transform = 'scale(.95)';
+        setTimeout(() => {
+          card.remove();
+          const grid = document.querySelector('.row.g-3');
+          if (grid && grid.children.length === 0) {
+            const wrapper = grid.parentElement;
+            grid.remove();
+            const empty = document.createElement('div');
+            empty.className = 'text-center py-5';
+            empty.style.color = 'var(--mm-text-muted)';
+            empty.innerHTML = `
+              <i class="bi bi-check-circle-fill" style="font-size:3rem; margin-bottom:1rem; display:block; color:var(--mm-green);"></i>
+              <h6 class="fw-bold">No hay pedidos listos por entregar</h6>
+              <p style="font-size:.875rem;">Todos los pedidos han sido entregados</p>
+              <a href="{% url 'mesero:mapa_mesas' %}" class="btn btn-primary mt-2">Ver mapa de mesas</a>`;
+            wrapper.appendChild(empty);
+          }
+        }, 320);
+      }
+
+      document.querySelectorAll('.badge-alert').forEach(b => {
+        const n = parseInt(b.textContent, 10);
+        if (!isNaN(n) && n > 0) {
+          const nuevo = n - 1;
+          if (nuevo <= 0) b.remove(); else b.textContent = String(nuevo);
+        }
+      });
+
+      if (currentMesaId) selectMesa(currentMesaId,null,true);
+      pollMesas();
+    } else {
+      showToast(d.error || 'Error al entregar el pedido','error');
+    }
+  } catch(e) {
+    console.error('entregarPedido:', e);
+    showToast('Error de conexión','error');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+// Cierra una sesión individual de la mesa tras confirmación del usuario
+async function cerrarSesion(sid, alias) {
+  if (!confirm(`¿Cerrar sesión de ${alias}?`)) return;
+  const res = await fetch('{% url "mesero:cerrar_sesion" %}', {
+    method:'POST', headers:{'Content-Type':'application/json','X-CSRFToken':CSRF},
+    body: JSON.stringify({sesion_id:sid})
+  });
+  if ((await res.json()).ok) { showToast('Sesión cerrada','success'); if (currentMesaId) selectMesa(currentMesaId,null,true); pollMesas(); }
+}
+
+// Solicita la cuenta grupal de toda la mesa (crea SolicitudPago tipo 'grupal')
+async function solicitarCuentaMesa(mesaId) {
+  if (!confirm('¿Solicitar la cuenta para toda la mesa?')) return;
+  const res = await fetch('{% url "mesero:solicitar_cuenta_mesero" %}', {
+    method: 'POST', headers: {'Content-Type':'application/json','X-CSRFToken':CSRF},
+    body: JSON.stringify({mesa_id: mesaId, tipo: 'grupal'})
+  });
+  const d = await res.json();
+  showToast(d.mensaje || (d.ok ? 'Solicitud creada' : d.error), d.ok ? 'success' : 'error');
+  if (d.ok && currentMesaId) selectMesa(currentMesaId, null, true);
+}
+
+// Solicita la cuenta individual de una sesión (crea SolicitudPago tipo 'individual')
+async function solicitarCuentaSesion(mesaId, sesionId) {
+  if (!confirm('¿Solicitar la cuenta individual para esta sesión?')) return;
+  const res = await fetch('{% url "mesero:solicitar_cuenta_mesero" %}', {
+    method: 'POST', headers: {'Content-Type':'application/json','X-CSRFToken':CSRF},
+    body: JSON.stringify({mesa_id: mesaId, sesion_id: sesionId, tipo: 'individual'})
+  });
+  const d = await res.json();
+  showToast(d.mensaje || (d.ok ? 'Solicitud creada' : d.error), d.ok ? 'success' : 'error');
+  if (d.ok && currentMesaId) selectMesa(currentMesaId, null, true);
+}
+
+// Cierra la mesa completa (todas las sesiones activas) sin procesar cobro
+async function cerrarMesa() {
+  if (!confirm('¿Cerrar esta mesa completamente?')) return;
+  const res = await fetch('{% url "mesero:cerrar_mesa" %}', {
+    method:'POST', headers:{'Content-Type':'application/json','X-CSRFToken':CSRF},
+    body: JSON.stringify({mesa_id:currentMesaId})
+  });
+  if ((await res.json()).ok) { showToast('Mesa cerrada','success'); closePanel(); pollMesas(); }
+}
+
+// Abre el modal de cancelación precargando el ID del pedido
+function abrirCancelar(id) {
+  document.getElementById('cancelarPedidoId').value = id;
+  document.getElementById('cancelarMotivo').value = '';
+  new bootstrap.Modal(document.getElementById('cancelarModal')).show();
+}
+
+// Envía la cancelación al backend con el motivo introducido por el mesero
+async function confirmarCancelacion() {
+  const id = document.getElementById('cancelarPedidoId').value;
+  const motivo = document.getElementById('cancelarMotivo').value.trim();
+  if (!motivo) { showToast('Ingresa un motivo','error'); return; }
+  const res = await fetch('{% url "mesero:cancelar_pedido" %}', {
+    method:'POST', headers:{'Content-Type':'application/json','X-CSRFToken':CSRF},
+    body: JSON.stringify({pedido_id:id, motivo})
+  });
+  if ((await res.json()).ok) {
+    bootstrap.Modal.getInstance(document.getElementById('cancelarModal')).hide();
+    showToast('Pedido cancelado','success');
+    if (currentMesaId) selectMesa(currentMesaId,null,true);
+  }
+}
+
+// ── AGREGAR CLIENTE ───────────────────────────────────────────────────────────
+// Abre el modal para añadir un cliente asistido a la mesa actualmente seleccionada
+function abrirAgregarCliente() {
+  if (!currentMesaId) return;
+  document.getElementById('agregarClienteMesaId').value = currentMesaId;
+  document.getElementById('agregarClienteAlias').value = '';
+  new bootstrap.Modal(document.getElementById('agregarClienteModal')).show();
+}
+
+// Crea una SesionCliente asistida (modalidad='asistido') con el alias del cliente
+async function confirmarAgregarCliente() {
+  const mesaId = document.getElementById('agregarClienteMesaId').value;
+  const alias = document.getElementById('agregarClienteAlias').value.trim();
+  if (!alias) { showToast('Ingresa un nombre o alias','error'); return; }
+  const res = await fetch('{% url "mesero:agregar_sesion_asistida" %}', {
+    method:'POST', headers:{'Content-Type':'application/json','X-CSRFToken':CSRF},
+    body: JSON.stringify({mesa_id: mesaId, alias})
+  });
+  const d = await res.json();
+  if (d.ok) {
+    bootstrap.Modal.getInstance(document.getElementById('agregarClienteModal')).hide();
+    showToast(`Cliente "${alias}" agregado`,'success');
+    selectMesa(currentMesaId, null, true);
+    pollMesas();
+  } else {
+    showToast(d.error || 'Error al agregar cliente','error');
+  }
+}
+
+// ── PEDIDO ASISTIDO CON MODIFICADORES ────────────────────────────────────────
+let asistidoIdemKey = null;  // token de idempotencia del pedido asistido actual
+
+// Inicializa el estado del modal asistido y carga el catálogo de productos.
+// Genera un token UUID nuevo en cada apertura para garantizar idempotencia (P1).
+function abrirAsistido(sesionId, alias) {
+  asistidoSesionId = sesionId;
+  asistidoCart = [];
+  asistidoPromo = null;
+  asistidoPromoElegibles = [];
+  // Nuevo token por apertura del modal: distingue cada pedido asistido.
+  asistidoIdemKey = (crypto.randomUUID && crypto.randomUUID()) ||
+    ('idem-' + Date.now() + '-' + Math.random().toString(36).slice(2));
+  currentProducto = null;
+  currentQty = 1;
+  document.getElementById('asistidoTitle').textContent = `Pedido · ${alias}`;
+  document.getElementById('asistidoSubtitle').textContent = `Mesa ${panelData?.numero_mesa || ''}`;
+  document.getElementById('asistidoCartSummary').style.display = 'none';
+  document.getElementById('btnConfirmarAsistido').disabled = true;
+  document.getElementById('asistidoProductDetail').style.display = 'none';
+  document.getElementById('asistidoProductsContainer').innerHTML = '<div class="text-center py-3"><div class="spinner-border spinner-border-sm"></div></div>';
+  new bootstrap.Modal(document.getElementById('asistidoModal')).show();
+  fetch('{% url "mesero:productos_json" %}')
+    .then(r=>r.json())
+    .then(data => {
+      if (data.ok) renderAsistidoProductos(data.productos);
+      else document.getElementById('asistidoProductsContainer').innerHTML='<p class="text-muted">No hay productos disponibles.</p>';
+    })
+    .catch(()=>{ document.getElementById('asistidoProductsContainer').innerHTML='<p class="text-muted text-danger">Error al cargar productos.</p>'; });
+}
+
+// Renderiza el grid de productos en el paso 1 del modal asistido.
+// Cada tarjeta indica si el producto tiene modificadores configurables.
+function renderAsistidoProductos(productos) {
+  const html = '<div class="row g-2">' + productos.map(p => `
+    <div class="col-6">
+      <div style="cursor:pointer;border:1px solid var(--mm-border);border-radius:var(--radius-sm);padding:.75rem;transition:border-color .15s;"
+           onmouseover="this.style.borderColor='var(--mm-green)'" onmouseout="this.style.borderColor='var(--mm-border)'"
+           onclick='openProductoAsistido(${JSON.stringify(p).replace(/'/g,"&#39;")})'>
+        <div class="fw-semibold" style="font-size:.9rem;">${p.nombre}</div>
+        <div style="color:var(--mm-green);font-weight:700;">$${parseFloat(p.precio).toFixed(2)}</div>
+        ${p.grupos_modificadores && p.grupos_modificadores.length ? '<div style="font-size:.7rem;color:var(--mm-text-muted);">+ opciones</div>' : ''}
+      </div>
+    </div>`).join('') + '</div>';
+  document.getElementById('asistidoProductsContainer').innerHTML = html;
+}
+
+// Muestra el paso 2 del modal: detalle del producto con grupos de modificadores.
+// Genera inputs radio/checkbox según el tipo del grupo ('única'/'múltiple').
+function openProductoAsistido(producto) {
+  currentProducto = producto;
+  currentQty = 1;
+  document.getElementById('detailNombre').textContent = producto.nombre;
+  document.getElementById('detailPrecioBase').textContent = `$${parseFloat(producto.precio).toFixed(2)}`;
+  document.getElementById('detailQty').textContent = '1';
+  document.getElementById('detailNotas').value = '';
+
+  const gruposEl = document.getElementById('detailGrupos');
+  if (producto.grupos_modificadores && producto.grupos_modificadores.length) {
+    gruposEl.innerHTML = producto.grupos_modificadores.map(g => `
+      <div class="mb-3">
+        <label class="form-label fw-semibold" style="font-size:.85rem;">
+          ${g.nombre} ${g.es_obligatorio ? '<span class="text-danger">*</span>' : ''}
+          <span style="font-size:.72rem;color:var(--mm-text-muted);font-weight:400;">(${g.tipo})</span>
+        </label>
+        ${g.opciones.map(op => `
+          <div class="form-check">
+            <input class="form-check-input mod-opcion" type="${g.tipo==='única'?'radio':'checkbox'}"
+                   name="mod_${g.id}" value="${op.id}" id="op_${op.id}"
+                   data-precio="${op.precio_extra}" onchange="recalcAsistidoSubtotal()">
+            <label class="form-check-label" for="op_${op.id}" style="font-size:.875rem;">
+              ${op.nombre}${parseFloat(op.precio_extra)>0?` <span style="color:var(--mm-green);font-weight:600;">+$${parseFloat(op.precio_extra).toFixed(2)}</span>`:''}
+            </label>
+          </div>`).join('')}
+      </div>`).join('');
+  } else {
+    gruposEl.innerHTML = '';
+  }
+
+  recalcAsistidoSubtotal();
+  document.getElementById('asistidoProductsContainer').style.display = 'none';
+  document.getElementById('asistidoProductDetail').style.display = 'block';
+}
+
+// Regresa al grid de productos desde el detalle (paso 2 → paso 1)
+function volverAProductos() {
+  document.getElementById('asistidoProductDetail').style.display = 'none';
+  document.getElementById('asistidoProductsContainer').style.display = 'block';
+}
+
+// Incrementa o decrementa la cantidad del ítem en el detalle; mínimo 1
+function changeAsistidoQty(delta) {
+  currentQty = Math.max(1, currentQty + delta);
+  document.getElementById('detailQty').textContent = currentQty;
+  recalcAsistidoSubtotal();
+}
+
+// Recalcula el subtotal del ítem actual sumando precio base + extras de modificadores
+function recalcAsistidoSubtotal() {
+  if (!currentProducto) return;
+  let extra = 0;
+  document.querySelectorAll('.mod-opcion:checked').forEach(el => {
+    extra += parseFloat(el.dataset.precio) || 0;
+  });
+  const sub = (parseFloat(currentProducto.precio) + extra) * currentQty;
+  document.getElementById('detailSubtotal').textContent = `$${sub.toFixed(2)}`;
+}
+
+// Valida grupos obligatorios, construye el ítem del carrito y regresa al grid.
+// Llama a renderAsistidoCart() para actualizar el resumen.
+function addToCartAsistido() {
+  if (!currentProducto) return;
+  // Validate obligatory groups
+  const grupos = currentProducto.grupos_modificadores || [];
+  for (const g of grupos) {
+    if (g.es_obligatorio) {
+      const checked = document.querySelector(`.mod-opcion[name="mod_${g.id}"]:checked`);
+      if (!checked) { showToast(`Selecciona una opción para: ${g.nombre}`,'error'); return; }
+    }
+  }
+  let extra = 0;
+  const modificadores = [];
+  document.querySelectorAll('.mod-opcion:checked').forEach(el => {
+    extra += parseFloat(el.dataset.precio) || 0;
+    modificadores.push(parseInt(el.value));
+  });
+  const subtotal = (parseFloat(currentProducto.precio) + extra) * currentQty;
+  asistidoCart.push({
+    producto_id: currentProducto.id,
+    nombre: currentProducto.nombre,
+    cantidad: currentQty,
+    modificadores,
+    notas: document.getElementById('detailNotas').value.trim(),
+    subtotal
+  });
+  renderAsistidoCart();
+  volverAProductos();
+  showToast(`${currentProducto.nombre} agregado`,'success');
+}
+
+// Actualiza el resumen del carrito (paso 3) con los ítems actuales.
+// Muestra el total y dispara la consulta de promociones elegibles.
+// Si el carrito queda vacío, oculta el resumen y deshabilita "Enviar a cocina".
+function renderAsistidoCart() {
+  const container = document.getElementById('asistidoCartItems');
+  const cartDiv = document.getElementById('asistidoCartSummary');
+  const btn = document.getElementById('btnConfirmarAsistido');
+  if (!asistidoCart.length) {
+    cartDiv.style.display='none'; btn.disabled=true;
+    document.getElementById('asistidoPromoBox').style.display = 'none';
+    asistidoPromo = null; asistidoPromoElegibles = [];
+    return;
+  }
+  cartDiv.style.display = 'block'; btn.disabled = false;
+  let total = 0;
+  container.innerHTML = asistidoCart.map((item,i) => {
+    total += item.subtotal;
+    return `<div class="d-flex justify-content-between py-1 border-bottom">
+      <span>${item.cantidad}× ${item.nombre}${item.notas?` <small class="text-muted">(${item.notas})</small>`:''}</span>
+      <span>$${item.subtotal.toFixed(2)} <button class="btn btn-sm btn-link p-0 ms-1" onclick="removeAsistido(${i})" style="color:var(--mm-text-muted);"><i class="bi bi-trash3"></i></button></span>
+    </div>`;
+  }).join('');
+  document.getElementById('asistidoTotal').textContent = `$${total.toFixed(2)}`;
+  // Consultar promociones aplicables al carrito (mismo cálculo que el cliente)
+  _asistidoCargarPromos();
+}
+
+// Elimina el ítem en posición i del carrito y actualiza el resumen
+function removeAsistido(i) { asistidoCart.splice(i,1); renderAsistidoCart(); }
+
+// Consulta las promos elegibles para el carrito asistido y muestra el selector.
+async function _asistidoCargarPromos() {
+  const box      = document.getElementById('asistidoPromoBox');
+  const opciones = document.getElementById('asistidoPromoOpciones');
+  try {
+    const res = await fetch('{% url "cliente:calcular_carrito" %}', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+      body: JSON.stringify({
+        items: asistidoCart.map(it => ({
+          producto_id: it.producto_id, cantidad: it.cantidad,
+          subtotal: it.subtotal, modificadores: it.modificadores, notas: it.notas,
+        })),
+        promocion_id: asistidoPromo,
+      }),
+    });
+    const data = await res.json();
+    if (!data.ok) { box.style.display = 'none'; return; }
+    asistidoPromoElegibles = data.promociones_elegibles || [];
+
+    if (asistidoPromoElegibles.length === 0) {
+      box.style.display = 'none';
+      asistidoPromo = null;
+      return;
+    }
+    box.style.display = 'block';
+
+    if (asistidoPromoElegibles.length === 1) {
+      // Una sola promo elegible: se aplica automáticamente (igual que el cliente).
+      asistidoPromo = asistidoPromoElegibles[0].id;
+      opciones.innerHTML =
+        `<div><i class="bi bi-check-circle-fill me-1"></i>${asistidoPromoElegibles[0].titulo}
+         <small class="text-muted">(se aplica automáticamente)</small></div>`;
+    } else {
+      // Varias promos: el mesero debe elegir UNA (regla: una promo por pedido).
+      const radios = asistidoPromoElegibles.map(p => `
+        <label style="display:block; cursor:pointer; padding:.15rem 0;">
+          <input type="radio" name="asistidoPromoRadio" value="${p.id}"
+                 ${asistidoPromo === p.id ? 'checked' : ''}
+                 onchange="asistidoPromo = parseInt(this.value); _asistidoCargarPromos();">
+          ${p.titulo}${p.descripcion ? ` <small class="text-muted">— ${p.descripcion}</small>` : ''}
+        </label>`).join('');
+      opciones.innerHTML = `
+        <label style="display:block; cursor:pointer; padding:.15rem 0;">
+          <input type="radio" name="asistidoPromoRadio" value=""
+                 ${!asistidoPromo ? 'checked' : ''}
+                 onchange="asistidoPromo = null; _asistidoCargarPromos();">
+          <span class="text-muted">Sin promoción</span>
+        </label>${radios}`;
+    }
+  } catch (e) {
+    box.style.display = 'none';
+  }
+}
+
+// Envía el carrito asistido al backend para crear el pedido en cocina.
+// Incluye el token de idempotencia y la promoción elegida (BUGFIX problema 1).
+async function confirmarAsistido() {
+  if (!asistidoSesionId || !asistidoCart.length) return;
+  const btn = document.getElementById('btnConfirmarAsistido');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Enviando…';
+  try {
+    const res = await fetch('{% url "mesero:confirmar_pedido_asistido" %}', {
+      method:'POST', headers:{'Content-Type':'application/json','X-CSRFToken':CSRF},
+      body: JSON.stringify({
+        sesion_id: asistidoSesionId,
+        items: asistidoCart,
+        promocion_id: asistidoPromo,      // BUGFIX problema 1: enviar la promo elegida
+        idempotency_key: asistidoIdemKey, // P1: evita pedidos duplicados
+      })
+    });
+    const d = await res.json();
+    if (d.ok) {
+      bootstrap.Modal.getInstance(document.getElementById('asistidoModal')).hide();
+      showToast('Pedido enviado a cocina','success');
+      asistidoCart = [];
+      if (currentMesaId) selectMesa(currentMesaId,null,true);
+    } else showToast(d.error||'Error al enviar','error');
+  } catch(e) { showToast('Error de red','error'); }
+  finally { btn.disabled=false; btn.innerHTML='<i class="bi bi-send me-2"></i>Enviar a cocina'; }
+}
+
+// ── PAGO ──────────────────────────────────────────────────────────────────────
+// METODOS_PAGO proviene del contexto Django (JSON embebido); permite renderizar
+// el selector de métodos dinámicamente sin hardcodear nombres en JS.
+const METODOS_PAGO = {{ metodos_pago_json|default:"[]"|safe }};
+
+// Variables de estado del modal de pago
+let _pagoSubtotal = 0;   // total base (recalculado desde BD al abrir el modal)
+let _pagoPropina  = 0;   // propina elegida por el mesero
+let _pagoModo     = 'EFECTIVO';  // método de pago activo
+
+// Devuelve el icono HTML correspondiente al método de pago según su nombre
+function iconoMetodo(nombre) {
+  const n = (nombre || '').toLowerCase();
+  if (n.includes('efectivo')) return '<i class="bi bi-cash"></i>';
+  if (n.includes('tarjeta'))  return '<i class="bi bi-credit-card"></i>';
+  if (n.includes('paypal'))   return '<i class="bi bi-paypal"></i>';
+  if (n.includes('mixto'))    return '<i class="bi bi-shuffle"></i>';
+  if (n.includes('transfer')) return '<i class="bi bi-bank"></i>';
+  return '<i class="bi bi-cash-coin"></i>';
+}
+
+// Inicializa y abre el modal de pago.
+// Recibe el total de la SolicitudPago pero lo refresca desde el backend (P2)
+// por si el cliente agregó pedidos después de pedir la cuenta.
+// metodoPref: método preferido del cliente (pre-selecciona si está disponible).
+function abrirPago(mesaId, total, sesionId=null, metodoPref='') {
+  _pagoSubtotal = parseFloat(total) || 0;
+  _pagoPropina  = 0;
+  _pagoModo     = 'EFECTIVO';
+
+  document.getElementById('pagoMesaId').value   = mesaId;
+  document.getElementById('pagoSesionId').value = sesionId || '';
+  document.getElementById('pagoSubtitle').textContent = sesionId ? 'Cobro individual' : 'Toda la mesa';
+
+  // P2: recalcular el total en vivo desde el backend. El `total` que llega por
+  // parámetro viene de la SolicitudPago (puede estar desactualizado si el
+  // cliente agregó pedidos después de pedir la cuenta).
+  (function refrescarTotal() {
+    const qs = `mesa=${mesaId}` + (sesionId ? `&sesion=${sesionId}` : '');
+    fetch(`{% url "mesero:total_cobro" %}?${qs}`)
+      .then(r => r.json())
+      .then(d => {
+        if (d && d.ok && typeof d.total === 'number') {
+          _pagoSubtotal = d.total;
+          actualizarDesglose();
+          if (_pagoModo.includes('EFECTIVO')) calcCambio();
+          if (_pagoModo.includes('MIXTO'))    calcMixto();
+        }
+      })
+      .catch(() => {/* si falla, se queda con el total del parámetro */});
+  })();
+
+  // Reset propina
+  document.getElementById('propinaInput').value = '';
+  document.getElementById('pagoPropina').value  = '';
+  document.querySelectorAll('.propina-pct').forEach(b => { b.style.background='var(--mm-cream-dark)'; b.style.color='inherit'; });
+
+  // Reset efectivo
+  document.getElementById('montoRecibido').value     = '';
+  document.getElementById('pagoMontoRecibido').value = '';
+  document.getElementById('cambioDisplay').style.display = 'none';
+  document.getElementById('montoError').style.display    = 'none';
+
+  // Reset mixto
+  document.getElementById('mixtoEfectivo').value    = '';
+  document.getElementById('mixtoTarjeta').value     = '';
+  document.getElementById('pagoMontoEfectivo').value = '';
+  document.getElementById('pagoMontoTarjeta').value  = '';
+  document.getElementById('mixtoInfo').textContent   = '';
+  document.getElementById('mixtoError').style.display = 'none';
+
+  // Reset submit btn
+  const btn = document.getElementById('pagoSubmitBtn');
+  btn.disabled = false;
+  btn.textContent = 'Confirmar pago';
+
+  // Render methods — PayPal se paga desde la app del cliente, no aquí
+  const metodos = (METODOS_PAGO && METODOS_PAGO.length)
+    ? METODOS_PAGO.filter(m => !m.descripcion.toUpperCase().includes('PAYPAL'))
+    : [{id:1,descripcion:'Efectivo'},{id:2,descripcion:'Tarjeta'},{id:3,descripcion:'Mixto'}];
+
+  document.getElementById('metodosContainer').innerHTML = metodos.map((m,i)=>`
+    <label style="display:flex;align-items:center;gap:.75rem;padding:.85rem 1rem;border:1.5px solid var(--mm-border);border-radius:var(--radius-sm);margin-bottom:.5rem;cursor:pointer;" class="metodo-opt" onclick="selMetodo(${m.id},'${m.descripcion.toUpperCase()}',this)">
+      <input type="radio" value="${m.id}" ${i===0?'checked':''} style="display:none;">
+      <span>${iconoMetodo(m.descripcion)}</span><span style="font-weight:600;">${m.descripcion}</span>
+    </label>`).join('');
+
+  // Pre-select method from client preference, fallback to first
+  const pref = (metodoPref || '').toUpperCase();
+  const prefMetodo = pref ? metodos.find(m => m.descripcion.toUpperCase().includes(pref)) : null;
+  const selected   = prefMetodo || metodos[0];
+
+  document.getElementById('pagoMetodoId').value = selected.id;
+  const allOpts = document.querySelectorAll('.metodo-opt');
+  const selIdx  = metodos.indexOf(selected);
+  allOpts.forEach((o, i) => {
+    if (i === selIdx) { o.style.borderColor='var(--mm-green)'; o.style.background='var(--mm-green-pale)'; }
+  });
+
+  aplicarModoModal(selected.descripcion.toUpperCase());
+  actualizarDesglose();
+
+  new bootstrap.Modal(document.getElementById('pagoModal')).show();
+}
+
+// Actualiza los tres valores del desglose del modal: subtotal, propina y total
+function actualizarDesglose() {
+  const total = _pagoSubtotal + _pagoPropina;
+  document.getElementById('pagoSubtotalDisp').textContent = '$' + _pagoSubtotal.toFixed(2);
+  document.getElementById('pagoPropinaDisp').textContent  = '$' + _pagoPropina.toFixed(2);
+  document.getElementById('pagoPropinaRow').style.display = _pagoPropina > 0 ? '' : 'none';
+  document.getElementById('pagoTotal').textContent = '$' + total.toFixed(2);
+}
+
+// Calcula la propina como porcentaje del subtotal y resalta el botón elegido
+function setPropinaPct(pct) {
+  _pagoPropina = pct > 0 ? Math.round(_pagoSubtotal * pct) / 100 : 0;
+  document.getElementById('propinaInput').value = _pagoPropina > 0 ? _pagoPropina.toFixed(2) : '';
+  document.getElementById('pagoPropina').value  = _pagoPropina > 0 ? _pagoPropina.toFixed(2) : '';
+  document.querySelectorAll('.propina-pct').forEach(b => { b.style.background='var(--mm-cream-dark)'; b.style.color='inherit'; });
+  const clicked = [...document.querySelectorAll('.propina-pct')].find(b=>b.textContent.trim()===(pct===0?'Sin propina':`${pct}%`));
+  if (clicked) { clicked.style.background='var(--mm-green)'; clicked.style.color='#fff'; }
+  actualizarDesglose();
+  if (_pagoModo.includes('EFECTIVO')) calcCambio();
+  if (_pagoModo.includes('MIXTO'))    calcMixto();
+}
+
+// Selecciona un método de pago, actualiza el campo oculto y muestra/oculta secciones
+function selMetodo(id, desc, el) {
+  document.getElementById('pagoMetodoId').value = id;
+  document.querySelectorAll('.metodo-opt').forEach(o=>{ o.style.borderColor='var(--mm-border)'; o.style.background='transparent'; });
+  el.style.borderColor = 'var(--mm-green)'; el.style.background = 'var(--mm-green-pale)';
+  aplicarModoModal(desc);
+}
+
+// Aplica el modo de pago: muestra la sección correspondiente (efectivo / mixto)
+// y guarda el modo activo en _pagoModo para usarlo en validaciones.
+function aplicarModoModal(desc) {
+  _pagoModo = desc;
+  const isMixto    = desc.includes('MIXTO');
+  const isEfectivo = desc.includes('EFECTIVO');
+  document.getElementById('pagoEfectivoSec').style.display = isEfectivo ? '' : 'none';
+  document.getElementById('pagoMixtoSec').style.display    = isMixto   ? '' : 'none';
+}
+
+// Recalcula propina desde el input y muestra el cambio para efectivo.
+// También actualiza el campo oculto pagoMontoRecibido en tiempo real.
+function calcCambio() {
+  const propina = parseFloat(document.getElementById('propinaInput').value) || 0;
+  _pagoPropina  = Math.max(0, isNaN(propina) ? 0 : propina);
+  document.getElementById('pagoPropina').value = _pagoPropina > 0 ? _pagoPropina.toFixed(2) : '';
+  actualizarDesglose();
+
+  const totalConPropina = _pagoSubtotal + _pagoPropina;
+  const monto  = parseFloat(document.getElementById('montoRecibido').value) || 0;
+  const cambio = document.getElementById('cambioDisplay');
+  const err    = document.getElementById('montoError');
+  document.getElementById('pagoMontoRecibido').value = monto > 0 ? monto : '';
+
+  if (monto > 0 && monto < totalConPropina) {
+    cambio.style.display = 'none';
+    err.innerHTML = `<i class="bi bi-exclamation-triangle-fill me-1"></i>Faltan $${(totalConPropina - monto).toFixed(2)} para cubrir el total`;
+    err.style.display = 'block';
+  } else if (monto >= totalConPropina && totalConPropina > 0) {
+    cambio.style.display = 'block';
+    cambio.textContent   = `Cambio: $${(monto - totalConPropina).toFixed(2)}`;
+    err.style.display    = 'none';
+  } else {
+    cambio.style.display = 'none';
+    err.style.display    = 'none';
+  }
+}
+
+// Valida que efectivo + tarjeta cubran el total del pago mixto.
+// Actualiza los hiddens pagoMontoEfectivo / pagoMontoTarjeta en tiempo real.
+function calcMixto() {
+  const totalConPropina = _pagoSubtotal + _pagoPropina;
+  const ef  = parseFloat(document.getElementById('mixtoEfectivo').value) || 0;
+  const tar = parseFloat(document.getElementById('mixtoTarjeta').value)  || 0;
+  const suma = ef + tar;
+  const info = document.getElementById('mixtoInfo');
+  const err  = document.getElementById('mixtoError');
+
+  document.getElementById('pagoMontoEfectivo').value = ef  > 0 ? ef.toFixed(2)  : '';
+  document.getElementById('pagoMontoTarjeta').value  = tar > 0 ? tar.toFixed(2) : '';
+
+  if (suma > 0 && suma < totalConPropina) {
+    info.textContent  = '';
+    err.innerHTML   = `<i class="bi bi-exclamation-triangle-fill me-1"></i>Faltan $${(totalConPropina - suma).toFixed(2)} para cubrir el total ($${totalConPropina.toFixed(2)})`;
+    err.style.display = 'block';
+  } else if (suma >= totalConPropina && totalConPropina > 0) {
+    info.innerHTML  = `<i class="bi bi-check-circle-fill me-1"></i>Total cubierto`;
+    err.style.display = 'none';
+  } else {
+    info.textContent  = `Total a cubrir: $${totalConPropina.toFixed(2)}`;
+    err.style.display = 'none';
+  }
+}
+
+// Validación pre-submit del modal de pago: bloquea el envío si los montos son
+// insuficientes y desactiva el botón para prevenir doble envío.
+document.getElementById('pagoForm').addEventListener('submit', function(e) {
+  const totalConPropina = _pagoSubtotal + _pagoPropina;
+
+  if (_pagoModo.includes('MIXTO')) {
+    const ef  = parseFloat(document.getElementById('mixtoEfectivo').value) || 0;
+    const tar = parseFloat(document.getElementById('mixtoTarjeta').value)  || 0;
+    if (ef + tar < totalConPropina) {
+      e.preventDefault();
+      const err = document.getElementById('mixtoError');
+      err.innerHTML  = `<i class="bi bi-exclamation-triangle-fill me-1"></i>Monto insuficiente. Faltan $${(totalConPropina - ef - tar).toFixed(2)}.`;
+      err.style.display = 'block';
+      return;
+    }
+    document.getElementById('pagoMontoEfectivo').value = ef.toFixed(2);
+    document.getElementById('pagoMontoTarjeta').value  = tar.toFixed(2);
+  } else if (_pagoModo.includes('EFECTIVO')) {
+    const monto = parseFloat(document.getElementById('montoRecibido').value) || 0;
+    if (monto > 0 && monto < totalConPropina) {
+      e.preventDefault();
+      const err = document.getElementById('montoError');
+      err.innerHTML  = `<i class="bi bi-exclamation-triangle-fill me-1"></i>Monto insuficiente. Faltan $${(totalConPropina - monto).toFixed(2)}.`;
+      err.style.display = 'block';
+      document.getElementById('montoRecibido').focus();
+      return;
+    }
+    document.getElementById('pagoMontoRecibido').value = monto > 0 ? monto.toFixed(2) : '';
+  }
+
+  document.getElementById('pagoPropina').value = _pagoPropina > 0 ? _pagoPropina.toFixed(2) : '';
+  const btn = document.getElementById('pagoSubmitBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Procesando…';
+});
+
+// Restaurar botón de pago al cerrar el modal (evita doble bloqueo)
+// y limpiar los campos de propina/error para el siguiente uso del modal.
+document.getElementById('pagoModal').addEventListener('hidden.bs.modal', () => {
+  const btn = document.getElementById('pagoSubmitBtn');
+  btn.disabled = false;
+  btn.textContent = 'Confirmar pago';
+  document.getElementById('montoError').style.display = 'none';
+  document.getElementById('cambioDisplay').style.display = 'none';
+  document.getElementById('propinaInput').value = '';
+  document.getElementById('pagoPropina').value  = '';
+  document.querySelectorAll('.propina-pct').forEach(b => { b.style.background='var(--mm-cream-dark)'; b.style.color='inherit'; });
+});
+
+// ── INICIALIZACIÓN Y POLLING ──────────────────────────────────────────────────
+let _mesasPolling  = false;   // semáforo: evita solapamiento de peticiones
+let _mesasLastTs   = 0;       // timestamp de la última respuesta procesada
+let _listosPrev    = {{ listos_count|default:0 }};  // inicializado desde servidor
+
+// Consulta el estado de todas las mesas y actualiza el grid del mapa.
+// Lanza un toast al detectar nuevos pedidos listos (listos > _listosPrev).
+// No ejecuta si la pestaña está inactiva o si ya hay una petición en curso.
+async function pollMesas() {
+  if (_mesasPolling) return;           // evitar solapamiento
+  if (document.visibilityState === 'hidden') return;  // pestaña inactiva
+  _mesasPolling = true;
+  try {
+    const res  = await fetch('{% url "mesero:mesas_estado" %}');
+    const data = await res.json();
+    const serverTs = data.ts || Date.now();
+    if (serverTs < _mesasLastTs) return;   // respuesta fuera de orden
+    _mesasLastTs = serverTs;
+    if (!data.ok) return;
+    let ocupadas = 0, libres = 0;
+    data.mesas.forEach(m => {
+      const tile = document.getElementById(`mesa-tile-${m.id}`);
+      if (!tile) return;
+      const s = estadoStyles[m.estado_visual] || estadoStyles.libre;
+      tile.className = `mesa-tile ${s.cls}`;
+      tile.querySelector('.mesa-dot').style.background = s.dot;
+      tile.querySelector('.mesa-num').textContent = m.numero;
+      tile.querySelector('.mesa-label').textContent = m.nota_cierre ? 'Por cerrar' : s.label;
+      tile.title = m.nota_cierre || '';
+      tile.querySelector('div:last-child').innerHTML = m.nota_cierre
+        ? `<i class="bi bi-exclamation-triangle-fill" style="font-size:.65rem;color:#B7950B;"></i> Cerrar`
+        : `<i class="bi bi-people" style="font-size:.65rem;"></i> ${m.clientes}`;
+      if (m.estado_visual !== 'libre') ocupadas++; else libres++;
+    });
+    const summary = document.getElementById('mesasSummary');
+    if (summary) summary.textContent = `${ocupadas} mesas activas · ${libres} libres`;
+
+    // ── Notificación de pedidos listos ──────────────────────────────────────
+    const listos = data.listos_count ?? 0;
+    if (listos > _listosPrev) {
+      const nuevos = listos - _listosPrev;
+      showToast(
+        `${nuevos === 1 ? '1 pedido listo' : `${nuevos} pedidos listos`} para entregar`,
+        'success'
+      );
+    }
+    _listosPrev = listos;
+
+    // Actualizar badge del sidebar
+    const navBadge = document.getElementById('nav-listos-badge');
+    if (navBadge) {
+      navBadge.textContent = listos;
+      navBadge.style.display = listos > 0 ? '' : 'none';
+    }
+    // Actualizar botón del topbar
+    const topBtn = document.getElementById('topbar-listos-btn');
+    const topTxt = document.getElementById('topbar-listos-txt');
+    if (topBtn && topTxt) {
+      topTxt.textContent = listos;
+      topBtn.style.display = listos > 0 ? '' : 'none';
+    }
+
+    if (currentMesaId) selectMesa(currentMesaId, null, true);
+  } catch(e) { console.warn('pollMesas error:', e); }
+  finally { _mesasPolling = false; }
+}
+
+// Ejecutar polling al cargar la página, al volver de otra pestaña y cada 3 s
+document.addEventListener('DOMContentLoaded', () => pollMesas());
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') pollMesas();
+});
+setInterval(pollMesas, 3000);
+
+// ─── Cancelar solicitud de pago ───────────────────────────────────────────────
+let _solicitudIdACancelar = null;  // ID guardado al abrir el modal de confirmación
+
+// Guarda el ID de la solicitud y muestra el modal de confirmación
+function confirmarCancelarSolicitud(id) {
+  _solicitudIdACancelar = id;
+  new bootstrap.Modal(document.getElementById('modalCancelarSolicitud')).show();
+}
+
+// Ejecuta la cancelación de la solicitud tras confirmar en el modal
+async function ejecutarCancelarSolicitud() {
+  if (!_solicitudIdACancelar) return;
+  const modal = bootstrap.Modal.getInstance(document.getElementById('modalCancelarSolicitud'));
+  try {
+    const res = await fetch('{% url "mesero:cancelar_solicitud_pago" %}', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'X-CSRFToken': CSRF},
+      body: JSON.stringify({solicitud_id: _solicitudIdACancelar}),
+    });
+    const d = await res.json();
+    modal && modal.hide();
+    showToast(d.ok ? (d.mensaje || 'Solicitud cancelada') : (d.error || 'Error'), d.ok ? 'success' : 'error');
+    if (d.ok) { if (currentMesaId) selectMesa(currentMesaId, null, true); pollMesas(); }
+  } catch(e) { showToast('Error de red', 'error'); }
+  _solicitudIdACancelar = null;
+}
+
+// ─── Editar pedido por mesero ─────────────────────────────────────────────────
+let _pedidoEditarId = null;     // ID del pedido siendo editado
+let _pedidoEditarItems = [];    // ítems del pedido recibidos del backend (GET)
+
+// Carga los datos del pedido via GET y los renderiza como formulario editable.
+// Solo pedidos en estado 'recibido' son editables; el backend lo valida también.
+async function abrirEditarPedido(id) {
+  _pedidoEditarId = id;
+  const body = document.getElementById('editarPedidoBody');
+  body.innerHTML = '<div class="text-center py-4"><span class="spinner-border"></span></div>';
+  new bootstrap.Modal(document.getElementById('modalEditarPedido')).show();
+  try {
+    const res = await fetch(`/mesero/pedidos/${id}/editar/`);
+    const d = await res.json();
+    if (!d.ok) { body.innerHTML = `<p class="text-danger">${d.error}</p>`; return; }
+    _pedidoEditarItems = d.items;
+    body.innerHTML = d.items.map((item, idx) => `
+      <div class="mb-3 p-3 rounded-3" style="background:var(--mm-cream);border:1px solid var(--mm-border);">
+        <div class="fw-semibold mb-2">${item.producto_nombre}
+          ${item.modificadores.length ? `<span class="text-muted fw-normal" style="font-size:.8rem;"> · ${item.modificadores.join(', ')}</span>` : ''}
+        </div>
+        <div class="row g-2 align-items-center">
+          <div class="col-auto">
+            <label class="form-label mb-0" style="font-size:.8rem;">Cantidad</label>
+            <input type="number" min="1" class="form-control form-control-sm" style="width:80px;"
+              id="edit-qty-${idx}" value="${item.cantidad}">
+          </div>
+          <div class="col">
+            <label class="form-label mb-0" style="font-size:.8rem;">Notas</label>
+            <input type="text" maxlength="255" data-upper class="form-control form-control-sm"
+              id="edit-notas-${idx}" value="${item.notas || ''}">
+          </div>
+          <div class="col-auto text-end">
+            <div style="font-size:.75rem;color:var(--mm-text-muted);">Subtotal</div>
+            <div class="fw-bold" id="edit-sub-${idx}">$${item.subtotal.toFixed(2)}</div>
+          </div>
+        </div>
+      </div>`).join('');
+
+    // Enlaza eventos input en los campos de cantidad para recalcular
+    // el subtotal de cada ítem en tiempo real (usa precio_unitario histórico)
+    d.items.forEach((item, idx) => {
+      document.getElementById(`edit-qty-${idx}`).addEventListener('input', e => {
+        const qty = parseInt(e.target.value) || 1;
+        const sub = item.precio_unitario * qty;
+        document.getElementById(`edit-sub-${idx}`).textContent = '$' + sub.toFixed(2);
+      });
+    });
+  } catch(e) { body.innerHTML = '<p class="text-danger">Error al cargar el pedido.</p>'; }
+}
+
+// Recoge los valores del formulario de edición y los envía al backend (POST).
+// Espera 400 ms antes de refrescar el panel para dejar cerrar el modal primero.
+async function guardarEdicionPedido() {
+  if (!_pedidoEditarId) return;
+  const cambios = _pedidoEditarItems.map((item, idx) => ({
+    detalle_id: item.detalle_id,
+    cantidad: parseInt(document.getElementById(`edit-qty-${idx}`)?.value) || item.cantidad,
+    notas: document.getElementById(`edit-notas-${idx}`)?.value || item.notas,
+  }));
+  try {
+    const res = await fetch(`/mesero/pedidos/${_pedidoEditarId}/editar/`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'X-CSRFToken': CSRF},
+      body: JSON.stringify({cambios}),
+    });
+    const d = await res.json();
+    const modal = bootstrap.Modal.getInstance(document.getElementById('modalEditarPedido'));
+    modal && modal.hide();
+    showToast(d.ok ? (d.mensaje || 'Pedido actualizado') : (d.error || 'Error'), d.ok ? 'success' : 'error');
+    if (d.ok && currentMesaId) setTimeout(() => selectMesa(currentMesaId, null, true), 400);
+  } catch(e) { showToast('Error de red', 'error'); }
+}
+</script>
+{% endblock %}

@@ -1,0 +1,575 @@
+{% extends "base/staff_base.html" %}
+{% load static %}
+
+{% block title %}Reportes{% endblock %}
+{% block page_title %}Reportes{% endblock %}
+
+{% block sidebar_nav %}
+<a href="{% url 'gerente:floor_plan' %}"><i class="bi bi-grid-fill"></i> Floor Plan</a>
+<div class="nav-section-label">Gestión</div>
+<a href="{% url 'gerente:productos' %}"><i class="bi bi-basket-fill"></i> Gestión de Menú</a>
+<div class="nav-section-label">Reportes</div>
+<a href="{% url 'gerente:reportes' %}" {% if not vista or vista == 'reportes' %}class="active"{% endif %}><i class="bi bi-bar-chart-fill"></i> Reportes</a>
+<div class="nav-section-label">Admin</div>
+<a href="{% url 'gerente:empleados' %}"><i class="bi bi-people-fill"></i> Empleados</a>
+<a href="{% url 'gerente:configuracion' %}"><i class="bi bi-gear-fill"></i> Configuración</a>
+{% endblock %}
+
+{% block extra_head %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+:root {
+  --mm-green:       #3D6B4F;
+  --mm-green-dark:  #2D5A3D;
+  --mm-green-mid:   #5A8F6B;
+  --mm-green-pale:  #E8F4EA;
+  --mm-gold:        #C9933A;
+  --mm-gold-pale:   #FDF3E0;
+  --mm-blue:        #1A6A8A;
+  --mm-cream:       #F8F5EF;
+  --mm-cream-dark:  #EDE8DE;
+  --mm-white:       #FFFFFF;
+  --mm-border:      #E2DDD5;
+  --mm-text:        #1C2A1E;
+  --mm-text-muted:  #7A8C7E;
+  --mm-danger:      #C0392B;
+  --mm-success:     #2E7D32;
+  --radius-sm:      8px;
+  --radius-md:      12px;
+  --radius-lg:      18px;
+  --radius-pill:    999px;
+  --font-mono:      'JetBrains Mono', monospace;
+  --shadow-sm:      0 1px 4px rgba(0,0,0,.06);
+  --shadow-md:      0 4px 16px rgba(0,0,0,.08);
+}
+
+/* ── Page header ── */
+.rep-page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+  padding-bottom: 1.25rem;
+  border-bottom: 2px solid var(--mm-border);
+  position: relative;
+}
+.rep-page-header::after {
+  content: '';
+  position: absolute;
+  bottom: -2px; left: 0;
+  width: 80px; height: 2px;
+  background: var(--mm-green);
+  border-radius: var(--radius-pill);
+}
+
+/* ── Period selector pills ── */
+.period-pills {
+  display: flex;
+  background: var(--mm-cream);
+  border: 1px solid var(--mm-border);
+  border-radius: var(--radius-pill);
+  padding: .2rem;
+  gap: 0;
+}
+.period-pill {
+  padding: .35rem .9rem;
+  border-radius: var(--radius-pill);
+  font-size: .78rem;
+  font-weight: 600;
+  text-decoration: none;
+  color: var(--mm-text-muted);
+  transition: all .2s;
+  white-space: nowrap;
+}
+.period-pill.active, .period-pill:hover {
+  background: var(--mm-white);
+  color: var(--mm-green);
+  box-shadow: var(--shadow-sm);
+}
+.period-pill.active { color: var(--mm-green); font-weight: 700; }
+
+/* ── Action buttons ── */
+.rep-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: .4rem;
+  padding: .4rem .9rem;
+  border-radius: var(--radius-sm);
+  font-size: .78rem;
+  font-weight: 600;
+  text-decoration: none;
+  transition: all .15s;
+  border: 1px solid transparent;
+}
+.rep-action-btn.outline {
+  background: var(--mm-white);
+  border-color: var(--mm-border);
+  color: var(--mm-text-muted);
+}
+.rep-action-btn.outline:hover { border-color: var(--mm-green); color: var(--mm-green); }
+.rep-action-btn.pdf { background: var(--mm-danger); color: #fff; box-shadow: 0 2px 6px rgba(192,57,43,.3); }
+.rep-action-btn.pdf:hover { background: #a93226; color: #fff; }
+
+/* ── KPI Stat cards ── */
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.75rem;
+}
+.stat-card {
+  position: relative;
+  background: var(--mm-white);
+  border: 1px solid var(--mm-border);
+  border-radius: var(--radius-md);
+  padding: 1.3rem 1.25rem 1.1rem;
+  overflow: hidden;
+  transition: transform .2s, box-shadow .2s;
+  animation: fadeUp .35s ease both;
+}
+.stat-card:nth-child(1){animation-delay:.04s}
+.stat-card:nth-child(2){animation-delay:.08s}
+.stat-card:nth-child(3){animation-delay:.12s}
+.stat-card:nth-child(4){animation-delay:.16s}
+.stat-card:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); }
+.stat-card::after {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+}
+.stat-card:nth-child(1)::after { background: linear-gradient(90deg, var(--mm-green), var(--mm-green-mid)); }
+.stat-card:nth-child(2)::after { background: linear-gradient(90deg, var(--mm-blue), #2A8AAA); }
+.stat-card:nth-child(3)::after { background: linear-gradient(90deg, var(--mm-gold), #E8AA50); }
+.stat-card:nth-child(4)::after { background: linear-gradient(90deg, var(--mm-danger), #E05540); }
+
+.stat-icon {
+  width: 38px; height: 38px;
+  border-radius: var(--radius-sm);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1.1rem;
+  margin-bottom: .8rem;
+}
+.stat-card:nth-child(1) .stat-icon { background: var(--mm-green-pale); color: var(--mm-green); }
+.stat-card:nth-child(2) .stat-icon { background: rgba(26,106,138,.1); color: var(--mm-blue); }
+.stat-card:nth-child(3) .stat-icon { background: var(--mm-gold-pale); color: var(--mm-gold); }
+.stat-card:nth-child(4) .stat-icon { background: rgba(192,57,43,.1); color: var(--mm-danger); }
+
+.stat-value {
+  font-size: 1.65rem;
+  font-weight: 800;
+  color: var(--mm-text);
+  font-family: var(--font-mono);
+  line-height: 1.1;
+  letter-spacing: -.03em;
+}
+.stat-label {
+  font-size: .67rem;
+  color: var(--mm-text-muted);
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  font-weight: 700;
+  margin-top: .3rem;
+}
+
+/* ── Report tabs ── */
+.rep-tabs {
+  display: flex;
+  background: var(--mm-white);
+  border: 1px solid var(--mm-border);
+  border-radius: var(--radius-md);
+  padding: .3rem;
+  gap: .2rem;
+  margin-bottom: 1.5rem;
+  box-shadow: var(--shadow-sm);
+}
+.report-tab {
+  flex: 1;
+  padding: .6rem 1rem;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-sm);
+  font-size: .82rem;
+  font-weight: 600;
+  color: var(--mm-text-muted);
+  cursor: pointer;
+  transition: all .2s;
+}
+.report-tab:hover { background: var(--mm-cream); color: var(--mm-text); }
+.report-tab.active {
+  background: linear-gradient(135deg, var(--mm-green-dark), var(--mm-green));
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(61,107,79,.3);
+}
+
+/* ── Chart / content cards ── */
+.rep-card {
+  background: var(--mm-white);
+  border: 1px solid var(--mm-border);
+  border-radius: var(--radius-md);
+  padding: 1.5rem;
+  box-shadow: var(--shadow-sm);
+  position: relative;
+  overflow: hidden;
+}
+.rep-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--mm-green), var(--mm-blue));
+}
+.rep-card-title {
+  font-size: .7rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .12em;
+  color: var(--mm-text-muted);
+  margin-bottom: 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* ── Table inside card ── */
+.rep-table { width: 100%; border-collapse: collapse; font-size: .82rem; }
+.rep-table tbody tr { border-bottom: 1px solid var(--mm-border); transition: background .12s; }
+.rep-table tbody tr:last-child { border-bottom: none; }
+.rep-table tbody tr:hover { background: var(--mm-green-pale); }
+.rep-table tbody td { padding: .55rem 0; }
+
+/* ── Quincenales file card ── */
+.quinc-card {
+  background: var(--mm-white);
+  border: 1px solid var(--mm-border);
+  border-radius: var(--radius-md);
+  padding: 1.1rem 1.25rem;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  transition: all .2s;
+  box-shadow: var(--shadow-sm);
+}
+.quinc-card:hover {
+  border-color: var(--mm-green);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-2px);
+}
+
+/* ── Auditoría table ── */
+.audit-table { width: 100%; border-collapse: collapse; font-size: .82rem; }
+.audit-table thead th {
+  background: linear-gradient(135deg, var(--mm-green-dark), var(--mm-green));
+  color: rgba(255,255,255,.9);
+  padding: .7rem 1rem;
+  font-size: .63rem;
+  text-transform: uppercase;
+  letter-spacing: .1em;
+  font-weight: 800;
+}
+.audit-table tbody tr { border-bottom: 1px solid var(--mm-border); transition: background .12s; }
+.audit-table tbody tr:last-child { border-bottom: none; }
+.audit-table tbody tr:hover { background: var(--mm-green-pale); }
+.audit-table tbody td { padding: .65rem 1rem; }
+
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+
+{% if vista == 'auditoria' %}
+<!-- ══════════════════════════════════════════════════════════════
+     AUDITORÍA
+══════════════════════════════════════════════════════════════ -->
+<div class="rep-page-header">
+  <div>
+    <h5 class="fw-bold mb-0" style="font-size:1.05rem;">Auditoría del sistema</h5>
+    <p style="font-size:.8rem;color:var(--mm-text-muted);margin:.2rem 0 0;">Registro de acciones realizadas por el personal</p>
+  </div>
+  <a href="{% url 'gerente:reportes' %}" class="rep-action-btn outline">
+    <i class="bi bi-arrow-left"></i> Volver a reportes
+  </a>
+</div>
+
+<div style="background:var(--mm-white);border:1px solid var(--mm-border);border-radius:var(--radius-md);overflow:hidden;box-shadow:var(--shadow-sm);">
+  <div style="padding:.75rem 1.1rem;background:var(--mm-cream);border-bottom:1px solid var(--mm-border);font-size:.68rem;font-weight:800;text-transform:uppercase;letter-spacing:.1em;color:var(--mm-text-muted);display:flex;align-items:center;gap:.4rem;">
+    <i class="bi bi-shield-check" style="color:var(--mm-green);"></i> Registro de actividad
+  </div>
+  <div class="table-responsive">
+    <table class="audit-table" data-paginate="20">
+      <thead>
+        <tr><th>Fecha</th><th>Acción</th><th>Empleado</th><th>Mesa</th><th>Detalle</th></tr>
+      </thead>
+      <tbody>
+        {% for r in registros %}
+        <tr>
+          <td style="white-space:nowrap;color:var(--mm-text-muted);font-size:.78rem;font-family:var(--font-mono);">{{ r.fecha_hora|date:"d/m/Y H:i" }}</td>
+          <td><span style="font-weight:700;font-size:.84rem;">{{ r.accion }}</span></td>
+          <td style="font-size:.83rem;">{{ r.empleado.nombre }}</td>
+          <td style="font-size:.83rem;">{% if r.mesa %}Mesa {{ r.mesa.numero_mesa }}{% else %}—{% endif %}</td>
+          <td style="font-size:.78rem;color:var(--mm-text-muted);max-width:240px;word-break:break-word;">{{ r.detalle|default:"—"|truncatechars:60 }}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="5" class="text-center py-5" style="color:var(--mm-text-muted);">Sin registros de auditoría</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+
+{% else %}
+<!-- ══════════════════════════════════════════════════════════════
+     REPORTES PRINCIPALES
+══════════════════════════════════════════════════════════════ -->
+
+<!-- Page header -->
+<div class="rep-page-header">
+  <div>
+    <h5 class="fw-bold mb-0" style="font-size:1.05rem;">Resumen de reportes</h5>
+    <p style="font-size:.8rem;color:var(--mm-text-muted);margin:.2rem 0 0;">
+      {{ desde|date:"d/m/Y" }} — {{ hasta|date:"d/m/Y" }}
+    </p>
+  </div>
+  <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;">
+    <a href="{% url 'gerente:auditoria' %}" class="rep-action-btn outline">
+      <i class="bi bi-shield-check"></i> Auditoría
+    </a>
+    <a href="{% url 'gerente:reporte_exportar' %}?formato=pdf&desde={{ desde|date:'Y-m-d' }}&hasta={{ hasta|date:'Y-m-d' }}"
+       class="rep-action-btn pdf">
+      <i class="bi bi-file-earmark-pdf"></i> PDF
+    </a>
+    <div class="period-pills">
+      <a href="?periodo=hoy"    class="period-pill {% if periodo == 'hoy' %}active{% endif %}">Hoy</a>
+      <a href="?periodo=semana" class="period-pill {% if periodo == 'semana' or not periodo %}active{% endif %}">Semana</a>
+      <a href="?periodo=mes"    class="period-pill {% if periodo == 'mes' %}active{% endif %}">Mes</a>
+    </div>
+  </div>
+</div>
+
+<!-- KPI Cards -->
+<div class="stat-grid">
+  <div class="stat-card">
+    <div class="stat-icon"><i class="bi bi-currency-dollar"></i></div>
+    <div class="stat-value">${{ total|floatformat:2 }}</div>
+    <div class="stat-label">Ventas totales</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-icon"><i class="bi bi-receipt"></i></div>
+    <div class="stat-value">{{ tickets }}</div>
+    <div class="stat-label">Pedidos</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-icon"><i class="bi bi-graph-up"></i></div>
+    <div class="stat-value">${{ ticket_promedio }}</div>
+    <div class="stat-label">Ticket promedio</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-icon"><i class="bi bi-x-circle"></i></div>
+    <div class="stat-value">{{ cancelaciones|length }}</div>
+    <div class="stat-label">Cancelaciones</div>
+  </div>
+</div>
+
+<!-- Tabs -->
+<div class="rep-tabs">
+  <button class="report-tab active" data-target="tabVentas" onclick="switchReportTab(this)">
+    <i class="bi bi-graph-up-arrow me-1"></i> Ventas
+  </button>
+  <button class="report-tab" data-target="tabProductos" onclick="switchReportTab(this)">
+    <i class="bi bi-bag-fill me-1"></i> Más vendidos
+  </button>
+  <button class="report-tab" data-target="tabCancelaciones" onclick="switchReportTab(this)">
+    <i class="bi bi-x-circle me-1"></i> Cancelaciones
+  </button>
+</div>
+
+<!-- Tab: Ventas -->
+<div id="tabVentas">
+  <div class="row g-4">
+    <div class="col-12">
+      <div class="rep-card">
+        <div class="rep-card-title">
+          <span><i class="bi bi-bar-chart-fill me-1"></i> Ventas por día</span>
+          <span style="font-size:.72rem;font-weight:600;">Últimos {{ ventas_por_dia|length }} días</span>
+        </div>
+        <canvas id="salesChart" height="80"></canvas>
+      </div>
+    </div>
+    <div class="col-md-6">
+      <div class="rep-card">
+        <div class="rep-card-title"><i class="bi bi-ticket-perforated me-1"></i> Tickets por día</div>
+        <canvas id="ticketsChart" height="120"></canvas>
+      </div>
+    </div>
+    <div class="col-md-6">
+      <div class="rep-card" style="height:100%;">
+        <div class="rep-card-title"><i class="bi bi-clock-history me-1"></i> Pedidos recientes</div>
+        <div style="max-height:200px;overflow-y:auto;">
+          {% for pedido in pedidos|slice:":10" %}
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:.5rem 0;border-bottom:1px solid var(--mm-border);" class="rep-table-row">
+            <div>
+              <span style="font-weight:700;font-family:var(--font-mono);font-size:.82rem;color:var(--mm-green);">#{{ pedido.pk }}</span>
+              <span style="color:var(--mm-text-muted);margin-left:.5rem;font-size:.8rem;">Mesa {{ pedido.sesion.mesa.numero_mesa }}</span>
+            </div>
+            <div style="display:flex;gap:.5rem;align-items:center;">
+              <span style="font-size:.78rem;background:var(--mm-green-pale);color:var(--mm-green);padding:.15rem .55rem;border-radius:var(--radius-pill);font-weight:700;">{{ pedido.detalles.all|length }} items</span>
+              <span style="font-size:.7rem;color:var(--mm-text-muted);font-family:var(--font-mono);">{{ pedido.fecha_hora_ingreso|date:"H:i" }}</span>
+            </div>
+          </div>
+          {% empty %}
+          <p style="color:var(--mm-text-muted);font-size:.85rem;margin:1rem 0;">Sin pedidos en el período</p>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Tab: Productos más vendidos -->
+<div id="tabProductos" style="display:none;">
+  <div class="rep-card">
+    <div class="rep-card-title"><i class="bi bi-trophy-fill" style="color:var(--mm-gold);"></i> Top productos del período</div>
+    <div class="table-responsive">
+      <table style="width:100%;border-collapse:collapse;font-size:.82rem;">
+        <thead>
+          <tr style="border-bottom:2px solid var(--mm-border);">
+            <th style="padding:.5rem 0;font-size:.65rem;text-transform:uppercase;letter-spacing:.08em;color:var(--mm-text-muted);font-weight:800;">#</th>
+            <th style="padding:.5rem 0;font-size:.65rem;text-transform:uppercase;letter-spacing:.08em;color:var(--mm-text-muted);font-weight:800;">Producto</th>
+            <th style="padding:.5rem 0;font-size:.65rem;text-transform:uppercase;letter-spacing:.08em;color:var(--mm-text-muted);font-weight:800;">Unidades</th>
+            <th style="padding:.5rem 0;font-size:.65rem;text-transform:uppercase;letter-spacing:.08em;color:var(--mm-text-muted);font-weight:800;text-align:right;">Ingreso</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for prod in top_productos %}
+          <tr style="border-bottom:1px solid var(--mm-border);">
+            <td style="padding:.6rem 0;color:var(--mm-text-muted);font-weight:700;font-size:.8rem;">{{ forloop.counter }}</td>
+            <td style="padding:.6rem 0;font-weight:600;">{{ prod.producto__nombre }}</td>
+            <td style="padding:.6rem 0;">
+              <div style="display:flex;align-items:center;gap:.75rem;">
+                <div style="background:linear-gradient(90deg,var(--mm-green),var(--mm-green-mid));height:6px;border-radius:99px;width:{{ prod.total_vendido }}px;max-width:100px;"></div>
+                <span style="font-weight:700;font-family:var(--font-mono);font-size:.82rem;">{{ prod.total_vendido }}</span>
+              </div>
+            </td>
+            <td style="padding:.6rem 0;font-weight:800;color:var(--mm-green);font-family:var(--font-mono);text-align:right;">${{ prod.ingreso|floatformat:2 }}</td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="4" style="text-align:center;padding:2.5rem 0;color:var(--mm-text-muted);">Sin datos para el período seleccionado</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Tab: Cancelaciones -->
+<div id="tabCancelaciones" style="display:none;">
+  <div class="rep-card">
+    <div class="rep-card-title"><i class="bi bi-x-circle-fill" style="color:var(--mm-danger);"></i> Auditoría de cancelaciones</div>
+    <div class="table-responsive">
+      <table style="width:100%;border-collapse:collapse;font-size:.82rem;" data-paginate="20">
+        <thead>
+          <tr style="border-bottom:2px solid var(--mm-border);">
+            <th style="padding:.5rem 0;font-size:.65rem;text-transform:uppercase;letter-spacing:.08em;color:var(--mm-text-muted);font-weight:800;">Pedido</th>
+            <th style="padding:.5rem 0;font-size:.65rem;text-transform:uppercase;letter-spacing:.08em;color:var(--mm-text-muted);font-weight:800;">Fecha</th>
+            <th style="padding:.5rem 0;font-size:.65rem;text-transform:uppercase;letter-spacing:.08em;color:var(--mm-text-muted);font-weight:800;">Mesa</th>
+            <th style="padding:.5rem 0;font-size:.65rem;text-transform:uppercase;letter-spacing:.08em;color:var(--mm-text-muted);font-weight:800;">Motivo</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for p in cancelaciones %}
+          <tr style="border-bottom:1px solid var(--mm-border);">
+            <td style="padding:.6rem 0;font-weight:700;font-family:var(--font-mono);font-size:.8rem;color:var(--mm-danger);">#{{ p.pk }}</td>
+            <td style="padding:.6rem 0;font-size:.8rem;color:var(--mm-text-muted);">{{ p.fecha_hora_ingreso|date:"d/m H:i" }}</td>
+            <td style="padding:.6rem 0;">Mesa {{ p.sesion.mesa.numero_mesa }}</td>
+            <td style="padding:.6rem 0;font-size:.8rem;color:var(--mm-text-muted);">{{ p.motivo_cancelacion|default:"—" }}</td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="4" style="text-align:center;padding:2.5rem 0;color:var(--mm-text-muted);">Sin cancelaciones en el período</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+{% endif %}
+
+{% endblock %}
+
+{% block extra_scripts %}
+{% if vista != 'auditoria' %}
+<script>
+const ventasData = {{ ventas_por_dia|safe }};
+
+function switchReportTab(btn) {
+  document.querySelectorAll('.report-tab').forEach(t => t.classList.remove('active'));
+  btn.classList.add('active');
+  document.querySelectorAll('#tabVentas, #tabProductos, #tabCancelaciones').forEach(t => t.style.display = 'none');
+  document.getElementById(btn.dataset.target).style.display = 'block';
+}
+
+// Sales chart con gradiente
+const ctxSales = document.getElementById('salesChart').getContext('2d');
+const gradSales = ctxSales.createLinearGradient(0, 0, 0, 260);
+gradSales.addColorStop(0, 'rgba(61,107,79,.85)');
+gradSales.addColorStop(1, 'rgba(61,107,79,.15)');
+
+new Chart(ctxSales, {
+  type: 'bar',
+  data: {
+    labels: ventasData.map(d => d.dia),
+    datasets: [{
+      label: 'Ventas ($)',
+      data: ventasData.map(d => d.total),
+      backgroundColor: gradSales,
+      borderRadius: 6,
+      borderSkipped: false,
+    }]
+  },
+  options: {
+    responsive: true,
+    plugins: { legend: { display: false } },
+    scales: {
+      y: { beginAtZero: true, grid: { color: 'rgba(226,221,213,.6)' }, ticks: { callback: v => '$' + v } },
+      x: { grid: { display: false } }
+    }
+  }
+});
+
+// Tickets chart
+const ctxTickets = document.getElementById('ticketsChart').getContext('2d');
+const gradTickets = ctxTickets.createLinearGradient(0, 0, 0, 200);
+gradTickets.addColorStop(0, 'rgba(26,106,138,.85)');
+gradTickets.addColorStop(1, 'rgba(26,106,138,.15)');
+
+new Chart(ctxTickets, {
+  type: 'bar',
+  data: {
+    labels: ventasData.map(d => d.dia),
+    datasets: [{
+      label: 'Tickets',
+      data: ventasData.map(d => d.tickets),
+      backgroundColor: gradTickets,
+      borderRadius: 5,
+      borderSkipped: false,
+    }]
+  },
+  options: {
+    responsive: true,
+    plugins: { legend: { display: false } },
+    scales: {
+      y: { beginAtZero: true, grid: { color: 'rgba(226,221,213,.6)' } },
+      x: { grid: { display: false } }
+    }
+  }
+});
+</script>
+{% endif %}
+{% endblock %}
