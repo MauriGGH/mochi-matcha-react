@@ -1,0 +1,386 @@
+{% extends "base/staff_base.html" %}
+{% load static %}
+{% comment %}Página de cobro dedicada del mesero. Se accede desde el mapa de mesas o
+   desde la vista de alertas cuando hay una solicitud de pago pendiente.
+   Soporta cobro grupal (toda la mesa) e individual (sesión específica).
+   Métodos disponibles: Efectivo, Tarjeta, Mixto (PayPal excluido aquí).
+   La lógica de validación de montos se repite en JS (feedback inmediato)
+   y en Python (seguridad en el backend).{% endcomment %}
+
+{% block title %}Procesar pago{% endblock %}
+{% block page_title %}Pago{% endblock %}
+
+{# ── Navegación del sidebar: único enlace de regreso al mapa ── #}
+{% block sidebar_nav %}
+<a href="{% url 'mesero:mapa_mesas' %}"><i class="bi bi-arrow-left"></i> Volver a mesas</a>
+{% endblock %}
+
+{% block content %}
+<div style="max-width:580px; margin:0 auto;">
+
+  {# ── Estado de error: no se recibió mesa en el query string ── #}
+  {% if not mesa %}
+  <div class="text-center py-5" style="color:var(--mm-text-muted);">
+    <i class="bi bi-search" style="font-size:2.5rem; margin-bottom:1rem; display:block;"></i>
+    <h6 class="fw-bold">No se especificó una mesa</h6>
+    <a href="{% url 'mesero:mapa_mesas' %}" class="btn btn-primary mt-3">Ir al mapa de mesas</a>
+  </div>
+  {% else %}
+
+  <!-- Mensajes de error del servidor -->
+  {% if messages %}
+  {% for msg in messages %}
+  <div class="alert alert-danger rounded-3 py-2 px-3 mb-3 d-flex align-items-center gap-2" style="font-size:.875rem;">
+    <i class="bi bi-exclamation-triangle-fill"></i> {{ msg }}
+  </div>
+  {% endfor %}
+  {% endif %}
+
+  {# ── Header: número, ubicación y PIN actual de la mesa ── #}
+  <!-- Header de mesa -->
+  <div style="background:var(--mm-white); border:1px solid var(--mm-border); border-radius:var(--radius-md); padding:1.25rem; margin-bottom:1.25rem;" class="d-flex align-items-center justify-content-between">
+    <div>
+      <h5 class="fw-bold mb-0">Mesa {{ mesa.numero_mesa }}</h5>
+      {% if mesa.ubicacion %}<div style="font-size:.8rem; color:var(--mm-text-muted);">{{ mesa.ubicacion }}</div>{% endif %}
+    </div>
+    {% if mesa.pin_actual %}
+    <div style="font-family:var(--font-mono); font-size:1.5rem; font-weight:700; letter-spacing:.2em; color:var(--mm-green); background:var(--mm-green-pale); padding:.4rem .9rem; border-radius:var(--radius-sm);">{{ mesa.pin_actual }}</div>
+    {% endif %}
+  </div>
+
+  {# ── Resumen del consumo: lista cada pedido de la mesa/sesión con sus ítems ── #}
+  <!-- Resumen del consumo -->
+  {% if pedidos %}
+  <div style="background:var(--mm-white); border:1px solid var(--mm-border); border-radius:var(--radius-md); padding:1.25rem; margin-bottom:1.25rem;">
+    <h6 class="fw-bold mb-3">Resumen de consumo</h6>
+    {% for pedido in pedidos %}
+    <div class="mb-2" style="padding-bottom:.5rem; border-bottom:1px solid var(--mm-border);">
+      <div class="d-flex justify-content-between" style="font-size:.82rem; color:var(--mm-text-muted);">
+        <span>Pedido #{{ pedido.pk }} · {{ pedido.sesion.alias }}</span>
+        <span>{{ pedido.fecha_hora_ingreso|date:"H:i" }}</span>
+      </div>
+      {% for d in pedido.detalles.all %}
+      <div class="d-flex justify-content-between" style="font-size:.875rem; padding:.2rem 0;">
+        <span>{{ d.cantidad }}× {{ d.producto.nombre }}{% if d.notas %} <span style="color:var(--mm-text-muted); font-size:.78rem;">· {{ d.notas }}</span>{% endif %}</span>
+        <span style="font-weight:600;">${{ d.subtotal_calculado|floatformat:2 }}</span>
+      </div>
+      {% endfor %}
+    </div>
+    {% endfor %}
+
+    {% comment %}Desglose dinámico: displayPropina y displayTotal se actualizan por JS
+       en tiempo real al cambiar la propina o el método de pago.{% endcomment %}
+    <!-- Desglose dinámico -->
+    <div class="d-flex justify-content-between mt-2" style="font-size:.875rem; color:var(--mm-text-muted);">
+      <span>Subtotal</span>
+      <span>${{ total|floatformat:2 }}</span>
+    </div>
+    <div class="d-flex justify-content-between align-items-center mt-1" style="font-size:.875rem; color:var(--mm-text-muted);">
+      <span>Propina</span>
+      <span id="displayPropina">$0.00</span>
+    </div>
+    <div class="d-flex justify-content-between fw-bold mt-2 pt-2" style="font-size:1.2rem; border-top:2px solid var(--mm-border);">
+      <span>Total a pagar</span>
+      <span style="color:var(--mm-green);" id="displayTotal">${{ total|floatformat:2 }}</span>
+    </div>
+  </div>
+  {% else %}
+  <div style="background:var(--mm-white); border:1px solid var(--mm-border); border-radius:var(--radius-md); padding:2rem; margin-bottom:1.25rem; text-align:center; color:var(--mm-text-muted);">
+    <i class="bi bi-clipboard" style="font-size:2rem; margin-bottom:.5rem; display:block;"></i>
+    <p style="font-size:.875rem; margin:0;">Sin pedidos registrados en esta mesa</p>
+  </div>
+  {% endif %}
+
+  {% comment %}── Formulario de pago: método, propina y montos. El JS actualiza los
+     campos ocultos antes del submit para evitar valores stale. ──{% endcomment %}
+  <!-- Formulario de pago -->
+  <div style="background:var(--mm-white); border:1px solid var(--mm-border); border-radius:var(--radius-md); padding:1.5rem; margin-bottom:1.25rem;">
+    <h6 class="fw-bold mb-3">Método de pago</h6>
+    <form method="post" action="{% url 'mesero:procesar_pago' %}" id="pagoForm" novalidate>
+      {% csrf_token %}
+      {# Campos ocultos con datos de la mesa/sesión y valores calculados por JS #}
+      <input type="hidden" name="mesa_id"        value="{{ mesa.pk }}">
+      <input type="hidden" name="metodo_pago_id"  id="metodoPagoId" value="{% if metodos %}{{ metodos.first.id }}{% endif %}">
+      <input type="hidden" name="sesion_id"       value="{{ sesion_id|default:'' }}">
+      <input type="hidden" name="propina"         id="propinaHidden" value="0">
+      <input type="hidden" name="monto_efectivo"  id="montoEfectivoHidden" value="">
+      <input type="hidden" name="monto_tarjeta"   id="montoTarjetaHidden"  value="">
+
+      {# ── Selector de método de pago: cada label actúa como radio button visual ── #}
+      <!-- Métodos de pago -->
+      <div class="mb-4">
+        {% for metodo in metodos %}
+        <label style="display:flex; align-items:center; gap:.75rem; padding:.85rem 1rem; border:1.5px solid var(--mm-border); border-radius:var(--radius-sm); margin-bottom:.5rem; cursor:pointer; transition:all .15s;"
+               class="metodo-option"
+               data-desc="{{ metodo.descripcion|upper }}"
+               onclick="selectMetodo({{ metodo.id }}, '{{ metodo.descripcion|upper }}', this)">
+          <input type="radio" name="metodo_display" value="{{ metodo.id }}" {% if forloop.first %}checked{% endif %} style="display:none;">
+          <span style="font-size:1.1rem;">
+            {% if 'Efectivo' in metodo.descripcion %}<i class="bi bi-cash"></i>
+            {% elif 'Tarjeta' in metodo.descripcion or 'Terminal' in metodo.descripcion %}<i class="bi bi-credit-card"></i>
+            {% elif 'Mixto' in metodo.descripcion %}<i class="bi bi-shuffle"></i>
+            {% else %}<i class="bi bi-credit-card"></i>{% endif %}
+          </span>
+          <span style="font-weight:600;">{{ metodo.descripcion }}</span>
+        </label>
+        {% empty %}
+        <p style="color:var(--mm-text-muted); font-size:.875rem;">Sin métodos de pago configurados.</p>
+        {% endfor %}
+      </div>
+
+      {# ── Selector de propina: botones rápidos por porcentaje + input libre ── #}
+      <!-- Propina -->
+      <div class="mb-3">
+        <label class="form-label fw-semibold" style="font-size:.875rem;">Propina <span class="text-muted fw-normal" style="font-size:.78rem;">(opcional)</span></label>
+        <div class="d-flex gap-2 mb-2">
+          <button type="button" class="btn btn-sm rounded-pill" style="background:var(--mm-cream-dark); font-size:.8rem;" onclick="setPropinaPct(10)">10%</button>
+          <button type="button" class="btn btn-sm rounded-pill" style="background:var(--mm-cream-dark); font-size:.8rem;" onclick="setPropinaPct(15)">15%</button>
+          <button type="button" class="btn btn-sm rounded-pill" style="background:var(--mm-cream-dark); font-size:.8rem;" onclick="setPropinaPct(20)">20%</button>
+          <button type="button" class="btn btn-sm rounded-pill" style="background:var(--mm-cream-dark); font-size:.8rem;" onclick="setPropina(0)">Sin propina</button>
+        </div>
+        <div class="input-group">
+          <span class="input-group-text" style="background:var(--mm-cream); border-color:var(--mm-border); font-weight:700;">$</span>
+          <input type="number" id="propinaInput" class="form-control" placeholder="0.00" step="0.01" min="0"
+                 inputmode="decimal" style="border-color:var(--mm-border); font-size:1rem;"
+                 oninput="updatePropina(parseFloat(this.value)||0)">
+        </div>
+      </div>
+
+      {% comment %}── Sección Efectivo: visible solo cuando el método es 'EFECTIVO'.
+         El JS calcula y muestra el cambio en tiempo real. ──{% endcomment %}
+      <!-- Monto recibido (solo Efectivo) -->
+      <div class="mb-4" id="montoContainer" style="display:none;">
+        <label class="form-label fw-semibold" style="font-size:.875rem;">Monto recibido</label>
+        <div class="input-group">
+          <span class="input-group-text" style="background:var(--mm-cream); border-color:var(--mm-border); font-weight:700;">$</span>
+          <input type="number" id="montoRecibidoInput" name="monto_recibido" class="form-control"
+                 placeholder="0.00" step="0.01" min="0" inputmode="decimal"
+                 style="border-color:var(--mm-border); font-size:1.1rem; font-weight:600;"
+                 oninput="calcCambio()">
+        </div>
+        <div id="cambioInfo" style="display:none; margin-top:.5rem; padding:.75rem 1rem; background:var(--mm-green-pale); border-radius:var(--radius-sm);">
+          <div class="d-flex justify-content-between">
+            <span style="font-size:.875rem; color:var(--mm-green); font-weight:600;"><i class="bi bi-cash-coin me-1"></i>Cambio</span>
+            <span style="font-size:1rem; color:var(--mm-green); font-weight:700;" id="cambioVal">$0.00</span>
+          </div>
+        </div>
+      </div>
+
+      {% comment %}── Sección Mixto: campos de efectivo + tarjeta. La suma debe cubrir
+         el total; el JS valida en tiempo real y al submit. ──{% endcomment %}
+      <!-- Pago mixto -->
+      <div class="mb-4" id="mixtoContainer" style="display:none;">
+        <div style="background:var(--mm-cream); border-radius:var(--radius-sm); padding:.75rem 1rem; margin-bottom:.75rem; font-size:.8rem; color:var(--mm-text-muted);">
+          <i class="bi bi-shuffle me-1"></i>Ingresa cuánto paga en efectivo y cuánto con tarjeta. La suma debe cubrir el total.
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold" style="font-size:.875rem;"><i class="bi bi-cash me-1"></i>Monto en efectivo</label>
+          <div class="input-group">
+            <span class="input-group-text" style="background:var(--mm-cream); border-color:var(--mm-border); font-weight:700;">$</span>
+            <input type="number" id="montoEfectivo" class="form-control" placeholder="0.00"
+                   step="0.01" min="0" inputmode="decimal"
+                   style="border-color:var(--mm-border); font-size:1.05rem; font-weight:600;"
+                   oninput="calcMixto()">
+          </div>
+        </div>
+        <div class="mb-2">
+          <label class="form-label fw-semibold" style="font-size:.875rem;"><i class="bi bi-credit-card me-1"></i>Monto con tarjeta</label>
+          <div class="input-group">
+            <span class="input-group-text" style="background:var(--mm-cream); border-color:var(--mm-border); font-weight:700;">$</span>
+            <input type="number" id="montoTarjeta" class="form-control" placeholder="0.00"
+                   step="0.01" min="0" inputmode="decimal"
+                   style="border-color:var(--mm-border); font-size:1.05rem; font-weight:600;"
+                   oninput="calcMixto()">
+          </div>
+        </div>
+        <div id="mixtoInfo" style="display:none; margin-top:.5rem; padding:.65rem .9rem; border-radius:var(--radius-sm);"></div>
+      </div>
+
+      {# ── Zona de error: mensaje de validación mostrado antes del submit ── #}
+      <!-- Error global (visible antes del submit) -->
+      <div id="errorGlobal" style="display:none; margin-bottom:1rem; padding:.75rem 1rem; background:#FDEDEC; border-radius:var(--radius-sm); font-size:.875rem; font-weight:600; color:#721c24;"></div>
+
+      <button type="submit" class="btn btn-primary w-100 py-3 fw-bold" style="font-size:1.05rem;" id="pagoSubmitBtn">
+        <i class="bi bi-cash-coin me-2"></i>Confirmar pago — <span id="btnTotal">${{ total|floatformat:2 }}</span>
+      </button>
+    </form>
+  </div>
+
+  <a href="{% url 'mesero:mapa_mesas' %}" class="btn w-100 py-2" style="background:var(--mm-cream-dark); color:var(--mm-text-muted);">
+    <i class="bi bi-arrow-left me-1"></i>Cancelar y volver
+  </a>
+
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+// total_js viene del contexto Python como float — sin problemas de locale
+const SUBTOTAL = {{ total_js }};
+// Propina acumulada elegida por el mesero (se actualiza con los botones rápidos o input)
+let _propina = 0;
+// Modo de pago activo ('EFECTIVO', 'TARJETA', 'MIXTO', etc.)
+let _modo = '{{ metodos.first.descripcion|upper|default:"EFECTIVO" }}';
+
+// Resaltar el primer método al cargar y aplicar su modo
+document.addEventListener('DOMContentLoaded', () => {
+  const first = document.querySelector('.metodo-option');
+  if (first) {
+    first.style.borderColor = 'var(--mm-green)';
+    first.style.background  = 'var(--mm-green-pale)';
+  }
+  aplicarModo(_modo);
+});
+
+// ── Selección de método ───────────────────────────────────────────────────────
+// Actualiza el campo oculto con el ID del método elegido, resalta visualmente
+// la opción seleccionada y muestra/oculta las secciones de monto correspondientes.
+function selectMetodo(id, desc, el) {
+  document.getElementById('metodoPagoId').value = id;
+  _modo = desc;
+  document.querySelectorAll('.metodo-option').forEach(opt => {
+    opt.style.borderColor = 'var(--mm-border)';
+    opt.style.background  = 'transparent';
+  });
+  el.style.borderColor = 'var(--mm-green)';
+  el.style.background  = 'var(--mm-green-pale)';
+  el.querySelector('input').checked = true;
+  aplicarModo(desc);
+}
+
+// Muestra/oculta las secciones de monto según el modo activo.
+// Solo Efectivo necesita campo de monto recibido; Mixto necesita dos campos.
+function aplicarModo(desc) {
+  const isMixto    = desc.includes('MIXTO');
+  const isEfectivo = desc.includes('EFECTIVO');
+  document.getElementById('montoContainer').style.display = isEfectivo ? 'block' : 'none';
+  document.getElementById('mixtoContainer').style.display = isMixto   ? 'block' : 'none';
+  ocultarErrores();
+}
+
+// ── Propina ───────────────────────────────────────────────────────────────────
+// Actualiza el total mostrado y el campo oculto cada vez que cambia la propina.
+// También recalcula el cambio/mixto si ya hay un monto ingresado.
+function updatePropina(valor) {
+  _propina = Math.max(0, isNaN(valor) ? 0 : valor);
+  document.getElementById('propinaHidden').value = _propina.toFixed(2);
+  const total = SUBTOTAL + _propina;
+  document.getElementById('displayPropina').textContent = '$' + _propina.toFixed(2);
+  document.getElementById('displayTotal').textContent   = '$' + total.toFixed(2);
+  document.getElementById('btnTotal').textContent        = '$' + total.toFixed(2);
+  if (_modo.includes('EFECTIVO')) calcCambio();
+  if (_modo.includes('MIXTO'))    calcMixto();
+}
+
+// Calcula la propina como porcentaje del subtotal y rellena el input
+function setPropinaPct(pct) {
+  const val = Math.round(SUBTOTAL * pct) / 100;
+  document.getElementById('propinaInput').value = val.toFixed(2);
+  updatePropina(val);
+}
+
+// Establece una propina fija (o la borra si val=0)
+function setPropina(val) {
+  document.getElementById('propinaInput').value = val > 0 ? val.toFixed(2) : '';
+  updatePropina(val);
+}
+
+// ── Efectivo: cambio ─────────────────────────────────────────────────────────
+// Calcula y muestra el cambio cuando el monto recibido supera el total.
+// Muestra error inmediato si el monto es insuficiente (feedback previo al submit).
+function calcCambio() {
+  const total    = SUBTOTAL + _propina;
+  const recibido = parseFloat(document.getElementById('montoRecibidoInput').value) || 0;
+  const cambioEl = document.getElementById('cambioInfo');
+  const errEl    = document.getElementById('errorGlobal');
+
+  if (recibido > 0 && recibido < total) {
+    cambioEl.style.display = 'none';
+    mostrarError(`Monto insuficiente — faltan $${(total - recibido).toFixed(2)}`);
+  } else if (recibido >= total && total > 0) {
+    cambioEl.style.display = 'block';
+    document.getElementById('cambioVal').textContent = '$' + (recibido - total).toFixed(2);
+    ocultarErrores();
+  } else {
+    cambioEl.style.display = 'none';
+    ocultarErrores();
+  }
+}
+
+// ── Mixto ─────────────────────────────────────────────────────────────────────
+// Valida que efectivo + tarjeta cubran el total con propina.
+// Actualiza los campos ocultos en tiempo real para que el submit siempre
+// envíe los valores actuales sin depender del estado previo del formulario.
+function calcMixto() {
+  const total   = SUBTOTAL + _propina;
+  const efectivo = parseFloat(document.getElementById('montoEfectivo').value) || 0;
+  const tarjeta  = parseFloat(document.getElementById('montoTarjeta').value)  || 0;
+  const infoEl   = document.getElementById('mixtoInfo');
+
+  // Actualizar hiddens en tiempo real
+  document.getElementById('montoEfectivoHidden').value = efectivo > 0 ? efectivo : '';
+  document.getElementById('montoTarjetaHidden').value  = tarjeta  > 0 ? tarjeta  : '';
+
+  if (efectivo <= 0 && tarjeta <= 0) { infoEl.style.display = 'none'; return; }
+
+  if (efectivo + tarjeta < total) {
+    infoEl.innerHTML   = `<span style="color:var(--mm-danger);font-weight:600;"><i class="bi bi-exclamation-triangle-fill me-1"></i>Faltan $${(total - efectivo - tarjeta).toFixed(2)} para cubrir el total</span>`;
+    infoEl.style.background = '#FDEDEC';
+  } else {
+    infoEl.innerHTML   = `<span style="color:var(--mm-green);font-weight:600;"><i class="bi bi-check-circle-fill me-1"></i>Suma correcta — $${(efectivo + tarjeta).toFixed(2)}</span>`;
+    infoEl.style.background = 'var(--mm-green-pale)';
+  }
+  infoEl.style.display = 'block';
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+// Muestra un mensaje de error en el área global antes del botón de submit
+function mostrarError(msg) {
+  const el = document.getElementById('errorGlobal');
+  el.textContent  = msg;
+  el.style.display = 'block';
+}
+// Oculta el mensaje de error global
+function ocultarErrores() {
+  document.getElementById('errorGlobal').style.display = 'none';
+}
+
+// ── Validación al submit ──────────────────────────────────────────────────────
+// Segunda línea de defensa (la primera es calcCambio/calcMixto en tiempo real).
+// Bloquea el formulario si los montos son insuficientes y desactiva el botón
+// para evitar envíos duplicados por doble-click.
+document.getElementById('pagoForm').addEventListener('submit', function(e) {
+  const total = SUBTOTAL + _propina;
+  ocultarErrores();
+
+  if (_modo.includes('EFECTIVO')) {
+    const monto = parseFloat(document.getElementById('montoRecibidoInput').value) || 0;
+    if (monto > 0 && monto < total) {
+      e.preventDefault();
+      mostrarError(`Monto insuficiente. Faltan $${(total - monto).toFixed(2)} para completar el pago.`);
+      document.getElementById('montoRecibidoInput').focus();
+      return;
+    }
+  }
+
+  if (_modo.includes('MIXTO')) {
+    const ef = parseFloat(document.getElementById('montoEfectivo').value) || 0;
+    const ta = parseFloat(document.getElementById('montoTarjeta').value)  || 0;
+    // Copiar a hiddens antes de enviar
+    document.getElementById('montoEfectivoHidden').value = ef > 0 ? ef.toFixed(2) : '';
+    document.getElementById('montoTarjetaHidden').value  = ta > 0 ? ta.toFixed(2) : '';
+    if (ef + ta < total) {
+      e.preventDefault();
+      mostrarError(`Monto insuficiente en pago mixto. Faltan $${(total - ef - ta).toFixed(2)}.`);
+      return;
+    }
+  }
+
+  // Deshabilitar botón para prevenir doble envío
+  const btn = document.getElementById('pagoSubmitBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Procesando…';
+});
+</script>
+{% endblock %}

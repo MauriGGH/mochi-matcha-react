@@ -1,0 +1,195 @@
+{% comment %}Ticket de venta del módulo mesero.
+   Se renderiza tanto para visualización en pantalla (con botones de acción)
+   como para generación de PDF via WeasyPrint (ticket_pdf view).
+   El CSS incluye reglas @media print que eliminan los botones de acción y
+   ajustan el ancho del ticket al formato térmico 80mm.
+   El contexto proviene de _ticket_context() en views.py.{% endcomment %}
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ticket #{{ sol.pk }} — {{ restaurante.nombre }}</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css">
+<style>
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:'Courier New',Courier,monospace;background:#f5f0e8;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:1.5rem 1rem;}
+/* SCREEN ACTIONS */
+.ticket-actions{display:flex;gap:.65rem;margin-bottom:1.5rem;flex-wrap:wrap;justify-content:center;}
+.btn-action{padding:.6rem 1.4rem;border-radius:8px;border:none;font-weight:700;font-size:.85rem;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;gap:.4rem;}
+.btn-print{background:#3D6B4F;color:#fff;}
+.btn-pdf{background:#C0392B;color:#fff;}
+.btn-back{background:#e8e0d0;color:#555;}
+.btn-print:hover{background:#2A4A36;}
+.btn-pdf:hover{background:#992d22;}
+/* TICKET WRAPPER */
+.ticket{background:#fff;width:100%;max-width:400px;border-radius:4px;box-shadow:0 4px 24px rgba(0,0,0,.13);padding:0;}
+/* HEADER */
+.t-header{background:#3D6B4F;color:#fff;padding:1.1rem 1.25rem .9rem;text-align:center;}
+.t-logo{font-size:2rem;margin-bottom:.2rem;}
+.t-nombre{font-size:1.05rem;font-weight:700;letter-spacing:.04em;}
+.t-sub{font-size:.68rem;opacity:.8;line-height:1.5;margin-top:.2rem;}
+.t-folio{font-size:.65rem;opacity:.65;margin-top:.35rem;letter-spacing:.08em;}
+/* BODY */
+.t-body{padding:.85rem 1.1rem;}
+/* META */
+.t-meta{display:grid;grid-template-columns:1fr 1fr;gap:.55rem .5rem;font-size:.72rem;color:#555;margin-bottom:.7rem;line-height:1.3;}
+.t-meta-full{grid-column:1/-1;}
+.t-meta strong{color:#222;display:block;margin-bottom:.1rem;}
+/* SEPARATOR */
+.sep{border:none;border-top:1px dashed #bbb;margin:.6rem 0;}
+.sep-solid{border:none;border-top:2px solid #222;margin:.6rem 0;}
+/* PRODUCTS TABLE */
+.t-table{width:100%;border-collapse:collapse;font-size:.76rem;}
+.t-table th{text-align:left;font-size:.65rem;color:#888;font-weight:700;padding:.15rem 0;text-transform:uppercase;letter-spacing:.04em;}
+.t-table th:last-child,.t-table td:last-child{text-align:right;}
+.t-table td{padding:.22rem 0;vertical-align:top;color:#222;}
+.t-table .td-name{font-weight:600;}
+.t-table .td-mod{color:#888;font-size:.67rem;padding-left:.5rem;}
+.t-table .td-promo{color:#2E7D52;font-size:.67rem;font-weight:700;padding-left:.5rem;}
+.t-table .td-note{color:#888;font-size:.67rem;padding-left:.5rem;font-style:italic;}
+/* TOTALS */
+.t-totals{font-size:.8rem;}
+.t-totals-row{display:flex;justify-content:space-between;padding:.2rem 0;color:#333;}
+.t-totals-row.descuento{color:#2E7D52;font-weight:600;}
+.t-totals-row.propina{color:#C9933A;}
+.t-totals-row.grand{font-size:1.15rem;font-weight:800;color:#222;border-top:2px solid #222;padding-top:.5rem;margin-top:.25rem;}
+/* PAGO */
+.t-pago{background:#f7f7f7;border-radius:4px;padding:.65rem .75rem;font-size:.73rem;margin-top:.5rem;}
+.t-pago-label{font-weight:700;font-size:.68rem;text-transform:uppercase;letter-spacing:.06em;color:#888;margin-bottom:.3rem;}
+.t-pago-row{display:flex;justify-content:space-between;color:#333;padding:.1rem 0;}
+.t-pago-row.cambio{color:#2E7D52;font-weight:700;}
+/* FOOTER */
+.t-footer{text-align:center;padding:.75rem 1.1rem 1rem;font-size:.67rem;color:#aaa;line-height:1.7;border-top:1px dashed #ddd;margin-top:.3rem;}
+.t-footer strong{color:#888;}
+/* PRINT */
+@media print {
+  body{background:#fff;padding:0;}
+  .ticket-actions{display:none;}
+  .ticket{max-width:80mm;width:80mm;box-shadow:none;border-radius:0;}
+  .t-header{-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+}
+/* WeasyPrint / PDF: aplica las mismas reglas de impresión y deja márgenes
+   generosos en la página para que la fecha/hora no se compriman ni se
+   superpongan al pie del PDF (fix 1.8). */
+@page { size: 80mm auto; margin: 4mm; }
+</style>
+</head>
+<body>
+
+{# ── Barra de acciones (oculta al imprimir por @media print) ── #}
+<div class="ticket-actions">
+  <button class="btn-action btn-print" onclick="window.print()"><i class="bi bi-printer-fill"></i> Imprimir ticket</button>
+  <a href="{% url 'mesero:ticket_pdf' sol.pk %}" class="btn-action btn-pdf" target="_blank"><i class="bi bi-file-earmark-pdf-fill"></i> Descargar PDF</a>
+  <a href="{% url 'mesero:mapa_mesas' %}" class="btn-action btn-back">← Volver al mapa</a>
+</div>
+
+<div class="ticket">
+  {# ── Cabecera del ticket: logo, datos del restaurante y folio ── #}
+  <!-- HEADER -->
+  <div class="t-header">
+    <div class="t-logo"><i class="bi bi-cup-hot-fill"></i></div>
+    <div class="t-nombre">{{ restaurante.nombre }}</div>
+    {% if restaurante.direccion %}<div class="t-sub">{{ restaurante.direccion }}</div>{% endif %}
+    {% if restaurante.telefono %}<div class="t-sub">Tel: {{ restaurante.telefono }}</div>{% endif %}
+    {% if restaurante.rfc %}<div class="t-sub">RFC: {{ restaurante.rfc }}</div>{% endif %}
+    <div class="t-folio">FOLIO #{{ sol.pk|stringformat:"06d" }}</div>
+  </div>
+
+  <div class="t-body">
+    {# ── Metadatos: fecha, hora, número de mesa, mesero y alias de sesión ── #}
+    <!-- META -->
+    <div class="t-meta">
+      <div><strong>Fecha</strong><br>{{ sol.fecha_hora|date:"d/m/Y" }}</div>
+      <div><strong>Hora</strong><br>{{ sol.fecha_hora|date:"H:i" }}</div>
+      {% if mesa %}<div><strong>Mesa</strong><br>{{ mesa.numero_mesa }}</div>{% endif %}
+      {% if mesero %}<div><strong>Mesero</strong><br>{{ mesero.nombre }}</div>{% endif %}
+      {% if sol.sesion %}<div class="t-meta-full"><strong>Sesión:</strong> {{ sol.sesion.alias }}</div>{% endif %}
+    </div>
+
+    <hr class="sep">
+
+    {% comment %}── Tabla de productos: itera todos los pedidos cubiertos por la solicitud.
+       Cada ítem muestra cantidad, nombre, precio unitario e importe.
+       Debajo de cada ítem se listan modificadores (con precio extra si aplica),
+       notas especiales y la etiqueta de promoción si hubo descuento. ──{% endcomment %}
+    <!-- PRODUCTOS -->
+    <table class="t-table">
+      <thead>
+        <tr>
+          <th style="width:28px;">#</th>
+          <th>Descripción</th>
+          <th style="width:55px;">P.U.</th>
+          <th style="width:60px;">Importe</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for pedido in pedidos %}{% for d in pedido.detalles.all %}
+        <tr>
+          <td style="color:#888;">{{ d.cantidad }}×</td>
+          <td class="td-name">{{ d.producto.nombre }}</td>
+          <td style="text-align:right;">${{ d.producto.precio|floatformat:2 }}</td>
+          <td style="text-align:right;font-weight:700;">${{ d.subtotal_calculado|floatformat:2 }}</td>
+        </tr>
+        {% for mod in d.modificadores.all %}
+        <tr><td></td><td colspan="3" class="td-mod">+ {{ mod.nombre_display }}{% if mod.precio_extra_aplicado > 0 %} (${{ mod.precio_extra_aplicado|floatformat:2 }}){% endif %}</td></tr>
+        {% endfor %}
+        {% if d.notas %}<tr><td></td><td colspan="3" class="td-note"><i class="bi bi-pencil-square"></i> {{ d.notas }}</td></tr>{% endif %}
+        {% if d.promocion %}<tr><td></td><td colspan="3" class="td-promo"><i class="bi bi-tag-fill"></i> {{ d.promocion.titulo }}</td></tr>{% endif %}
+        {% endfor %}{% endfor %}
+      </tbody>
+    </table>
+
+    <hr class="sep-solid">
+
+    {% comment %}── Desglose de totales: subtotal bruto (precio de lista), descuento de
+       promociones (E3), propina y total final. La fila de descuento y propina
+       solo se muestra si los valores son mayores a cero. ──{% endcomment %}
+    <!-- TOTALES -->
+    <div class="t-totals">
+      <div class="t-totals-row"><span>Subtotal</span><span>${{ subtotal|floatformat:2 }}</span></div>
+      {% if descuento_total > 0 %}<div class="t-totals-row descuento"><span><i class="bi bi-tag-fill"></i> Descuento (promos)</span><span>−${{ descuento_total|floatformat:2 }}</span></div>{% endif %}
+      {% if sol.propina_sugerida and sol.propina_sugerida > 0 %}<div class="t-totals-row propina"><span>Propina</span><span>${{ sol.propina_sugerida|floatformat:2 }}</span></div>{% endif %}
+      <div class="t-totals-row grand"><span>TOTAL</span><span>${{ total_final|floatformat:2 }}</span></div>
+    </div>
+
+    {% comment %}── Detalle del método de pago utilizado.
+       Rama MIXTO: muestra efectivo + tarjeta por separado.
+       Rama TERMINAL/TARJETA: monto total con terminal.
+       Rama PAYPAL: monto con referencia de la orden de PayPal.
+       Rama EFECTIVO (default): monto recibido y cambio si aplica. ──{% endcomment %}
+    <!-- DETALLE DE PAGO -->
+    <div class="t-pago">
+      <div class="t-pago-label">Método de pago</div>
+      {% if sol.detalle_pago %}
+        {% if 'MIXTO' in sol.detalle_pago %}
+        <div class="t-pago-row"><span><i class="bi bi-cash"></i> Efectivo</span><span>${{ sol.monto_efectivo|floatformat:2 }}</span></div>
+        <div class="t-pago-row"><span><i class="bi bi-credit-card"></i> Tarjeta</span><span>${{ sol.monto_tarjeta|floatformat:2 }}</span></div>
+        {% elif 'TERMINAL' in sol.detalle_pago or 'TARJETA' in sol.detalle_pago %}
+        <div class="t-pago-row"><span><i class="bi bi-credit-card"></i> Pago con terminal</span><span>${{ total_final|floatformat:2 }}</span></div>
+        {% elif 'PAYPAL' in sol.detalle_pago %}
+        <div class="t-pago-row"><span><i class="bi bi-paypal"></i> PayPal</span><span>${{ total_final|floatformat:2 }}</span></div>
+        {% if sol.referencia_externa %}<div class="t-pago-row" style="font-size:.67rem;color:#888;"><span>Ref. PayPal</span><span>{{ sol.referencia_externa }}</span></div>{% endif %}
+        {% else %}
+        <div class="t-pago-row"><span><i class="bi bi-cash"></i> Efectivo</span><span></span></div>
+        {% if sol.monto_recibido %}<div class="t-pago-row"><span>Recibido</span><span>${{ sol.monto_recibido|floatformat:2 }}</span></div>{% endif %}
+        {% if sol.cambio is not None and sol.cambio >= 0 %}<div class="t-pago-row cambio"><span><i class="bi bi-cash-coin"></i> Cambio</span><span>${{ sol.cambio|floatformat:2 }}</span></div>{% endif %}
+        {% endif %}
+      {% else %}
+        <div class="t-pago-row"><span>{{ sol.metodo_pago }}</span></div>
+      {% endif %}
+    </div>
+
+  </div><!-- /t-body -->
+
+  {# ── Pie del ticket: mensaje de agradecimiento y datos de folio ── #}
+  <!-- FOOTER -->
+  <div class="t-footer">
+    <strong>¡Gracias por su visita!</strong><br>
+    Regresen pronto <i class="bi bi-cup-hot-fill"></i><br>
+    {{ sol.fecha_hora|date:"d/m/Y H:i" }} — Folio #{{ sol.pk|stringformat:"06d" }}
+  </div>
+</div>
+
+</body>
+</html>

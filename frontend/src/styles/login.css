@@ -1,0 +1,204 @@
+/* ============================================================
+   Mochi Matcha — Login page styles
+   Estilos de la pantalla de login (pages/auth/Login.jsx) usada
+   por staff (mesero, cocina, gerente). Layout dos columnas en
+   desktop, una sola columna en mobile (< 768px).
+   ============================================================ */
+
+/* ============ Sección 1: Reset base de la página ============ */
+html, body {
+  height: 100%;
+  margin: 0;
+  font-family: var(--font-body);
+}
+
+/* ============ Sección 2: Shell — grid de dos columnas ============ */
+.login-shell {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  min-height: 100vh;
+  background: var(--mm-cream);
+}
+
+/* ============ Sección 3: Panel izquierdo — branding ============ */
+/* Gradiente verde corporativo con dos círculos blancos translúcidos
+   posicionados como blobs decorativos (::before y ::after). */
+.login-brand {
+  background: linear-gradient(160deg, var(--mm-green-dark) 0%, var(--mm-green) 55%, var(--mm-green-light) 100%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 3rem;
+  position: relative;
+  overflow: hidden;
+}
+.login-brand::before {
+  content: '';
+  position: absolute;
+  width: 420px; height: 420px;
+  border-radius: 50%;
+  background: rgba(255,255,255,.04);
+  top: -100px; left: -80px;
+}
+.login-brand::after {
+  content: '';
+  position: absolute;
+  width: 300px; height: 300px;
+  border-radius: 50%;
+  background: rgba(255,255,255,.04);
+  bottom: -60px; right: -60px;
+}
+/* Icono central con efecto glassmorphism (translucido + blur de fondo) */
+.brand-icon {
+  width: 80px; height: 80px;
+  background: rgba(255,255,255,.12);
+  border: 1px solid rgba(255,255,255,.18);
+  border-radius: var(--radius-xl);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 2.4rem;
+  margin-bottom: 1.75rem;
+  position: relative; z-index: 1;
+  backdrop-filter: blur(8px);
+}
+.brand-title {
+  font-family: var(--font-display);
+  font-size: 2rem;
+  font-weight: 700;
+  color: #fff;
+  text-align: center;
+  line-height: 1.2;
+  position: relative; z-index: 1;
+  margin-bottom: .5rem;
+}
+.brand-sub {
+  font-size: .85rem;
+  color: rgba(255,255,255,.6);
+  text-align: center;
+  position: relative; z-index: 1;
+  letter-spacing: .03em;
+}
+.brand-divider {
+  width: 40px; height: 2px;
+  background: rgba(255,255,255,.25);
+  border-radius: 99px;
+  margin: 1.5rem auto;
+  position: relative; z-index: 1;
+}
+.brand-role-pill {
+  background: rgba(255,255,255,.12);
+  border: 1px solid rgba(255,255,255,.18);
+  border-radius: var(--radius-pill);
+  padding: .45rem 1.25rem;
+  font-size: .82rem;
+  font-weight: 600;
+  color: rgba(255,255,255,.9);
+  display: inline-flex;
+  align-items: center;
+  gap: .5rem;
+  position: relative; z-index: 1;
+  letter-spacing: .02em;
+}
+
+/* ============ Sección 4: Panel derecho — formulario ============ */
+.login-form-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 3rem 2.5rem;
+  background: var(--mm-white);
+}
+.login-form-wrap {
+  width: 100%;
+  max-width: 380px;
+}
+.login-form-title {
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: var(--mm-text);
+  margin-bottom: .35rem;
+}
+.login-form-sub {
+  font-size: .84rem;
+  color: var(--mm-text-muted);
+  margin-bottom: 2rem;
+}
+.login-shell .form-label {
+  font-size: .82rem;
+  font-weight: 600;
+  color: var(--mm-text);
+  margin-bottom: .4rem;
+}
+.login-shell .input-group-text {
+  background: var(--mm-cream);
+  border-color: var(--mm-border);
+  color: var(--mm-text-muted);
+}
+.login-shell .form-control {
+  border-color: var(--mm-border);
+  border-radius: 0;
+  padding: .65rem .9rem;
+  font-size: .9rem;
+  color: var(--mm-text);
+  background: var(--mm-white);
+}
+.login-shell .form-control:focus {
+  border-color: var(--mm-green);
+  box-shadow: 0 0 0 3px rgba(61,107,79,.1);
+  background: var(--mm-white);
+}
+.login-shell .form-control::placeholder { color: var(--mm-text-muted); opacity: .6; }
+.login-shell .input-group > .form-control:last-child { border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
+.login-shell .input-group > .form-control:not(:last-child) { border-right: none; }
+.login-shell .input-group > .input-group-text:first-child { border-radius: var(--radius-sm) 0 0 var(--radius-sm); }
+.btn-toggle-pass {
+  background: var(--mm-cream);
+  border: 1px solid var(--mm-border);
+  border-left: none;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  color: var(--mm-text-muted);
+  padding: 0 .75rem;
+  cursor: pointer;
+}
+.btn-toggle-pass:hover { background: var(--mm-cream-dark); color: var(--mm-green); }
+/* Botón principal del form con sombra verde proyectada (color de marca) */
+.btn-login {
+  background: var(--mm-green);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: .8rem 1.5rem;
+  font-size: .95rem;
+  font-weight: 600;
+  width: 100%;
+  transition: background .2s, transform .15s, box-shadow .2s;
+  box-shadow: 0 4px 14px rgba(61,107,79,.25);
+}
+.btn-login:hover {
+  background: var(--mm-green-dark);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(61,107,79,.35);
+}
+.btn-login:active { transform: none; }
+.btn-login:disabled { opacity: .7; cursor: not-allowed; transform: none; }
+.login-alert {
+  background: #FEE8E6;
+  color: var(--mm-danger);
+  border: 1px solid rgba(192,57,43,.15);
+  font-size: .85rem;
+}
+.login-footer {
+  font-size: .75rem;
+  color: var(--mm-text-muted);
+  text-align: center;
+  margin-top: 2rem;
+}
+
+/* ============ Sección 5: Responsive — una sola columna en móvil ============ */
+@media (max-width: 768px) {
+  .login-shell { grid-template-columns: 1fr; }
+  .login-brand { display: none; }
+  .login-form-panel { padding: 2.5rem 1.5rem; background: var(--mm-cream); }
+  .login-form-wrap { max-width: 100%; }
+}

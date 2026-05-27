@@ -1,0 +1,264 @@
+{# ============================================================================= #}
+{# carrito.html — Vista del carrito del cliente.                                #}
+{# Muestra los ítems en sesión, el selector de promoción (si hay >1 elegible), #}
+{# el desglose de subtotal / descuento / total y el botón de envío a cocina.   #}
+{# El JS calcula descuentos en tiempo real vía AJAX y usa un token de          #}
+{# idempotencia para evitar pedidos duplicados (P1).                            #}
+{# ============================================================================= #}
+{% extends "base/cliente_base.html" %}
+{% load static %}
+
+{% block title %}Tu pedido — Mochi Matcha{% endblock %}
+
+{# ── Header del carrito: flecha de regreso + número de mesa + PIN ── #}
+{% block client_header %}
+<header class="client-header px-3 py-3 d-flex align-items-center justify-content-between"
+        style="background:var(--mm-white); border-bottom:1px solid var(--mm-border); position:sticky; top:0; z-index:50;">
+  <div class="d-flex align-items-center gap-2">
+    <a href="{% url 'cliente:menu' %}" style="color:var(--mm-text); text-decoration:none;"><i class="bi bi-arrow-left fs-5"></i></a>
+    <span class="fw-bold" style="font-size:1rem;">Tu pedido</span>
+  </div>
+  <span style="font-size:.8rem; color:var(--mm-text-muted);">Mesa {{ mesa.numero_mesa }} · <span class="fw-bold" style="font-family:var(--font-mono);">PIN: {{ pin_mesa }}</span></span>
+</header>
+{% endblock %}
+
+{% block content %}
+<div class="px-3 pt-3 pb-2">
+
+{# ── Estado vacío: carrito sin ítems ── #}
+{% if not carrito %}
+<!-- Empty cart -->
+<div class="text-center py-5">
+  <i class="bi bi-cart3" style="font-size:3rem; color:var(--mm-border); margin-bottom:1rem; display:block;"></i>
+  <h6 class="fw-bold mb-1" style="color:var(--mm-text-muted);">Tu carrito está vacío</h6>
+  <p style="font-size:.875rem; color:var(--mm-text-muted);">Agrega productos desde el menú</p>
+  <a href="{% url 'cliente:menu' %}" class="btn btn-primary mt-2">Ver el menú</a>
+</div>
+
+{% else %}
+
+{# ── Lista de ítems del carrito ── #}
+<!-- Cart items -->
+<div id="cartItems">
+{% for item in carrito %}
+{# Cada ítem muestra cantidad, nombre, modificadores, notas y precio; con botón de eliminar #}
+<div class="cart-item" data-index="{{ forloop.counter0 }}">
+  <div class="d-flex align-items-start justify-content-between gap-2">
+    <div class="d-flex align-items-center gap-2 flex-grow-1">
+      <span class="fw-bold" style="min-width:28px; color:var(--mm-text-muted); font-size:.875rem;">{{ item.cantidad }}×</span>
+      <div class="flex-grow-1">
+        <div class="cart-item-name">{{ item.nombre }}</div>
+        {% if item.modificadores %}
+        <div class="cart-item-mods">
+          {% for m in item.modificadores %}{{ m.nombre }}{% if not forloop.last %} · {% endif %}{% endfor %}
+        </div>
+        {% endif %}
+        {% if item.notas %}<div style="font-size:.75rem; color:var(--mm-text-muted); font-style:italic; margin-top:.2rem;">{{ item.notas }}</div>{% endif %}
+      </div>
+    </div>
+    <div class="d-flex align-items-center gap-2">
+      <span class="cart-item-price">${{ item.subtotal|floatformat:2 }}</span>
+      <button onclick="removeItem({{ forloop.counter0 }})" class="btn btn-link p-0" style="color:var(--mm-text-muted); font-size:1rem;">
+        <i class="bi bi-trash3"></i>
+      </button>
+    </div>
+  </div>
+</div>
+{% endfor %}
+</div>
+
+<!-- Selector de promoción (visible cuando hay >1 elegible) -->
+<div id="promoPicker" class="mt-3" style="display:none; background:var(--mm-cream); border:1.5px solid var(--mm-green); border-radius:var(--radius-md); padding:.85rem 1rem;">
+  <div style="font-size:.78rem; font-weight:700; color:var(--mm-green); margin-bottom:.5rem; display:flex; align-items:center; gap:.35rem;">
+    <i class="bi bi-tag-fill"></i> ELIGE UNA PROMOCIÓN
+  </div>
+  <div style="font-size:.72rem; color:var(--mm-text-muted); margin-bottom:.6rem;">
+    Solo se puede aplicar una promoción por pedido.
+  </div>
+  <div id="promoOptions" style="display:flex; flex-direction:column; gap:.4rem;"></div>
+</div>
+
+<!-- Total -->
+<div class="cart-total-bar mt-3 mb-4">
+  <div class="d-flex justify-content-between mb-1" style="font-size:.875rem; color:var(--mm-text-muted);">
+    <span>Subtotal</span>
+    <span id="subtotalDisplay">${{ total|floatformat:2 }}</span>
+  </div>
+  <div id="descuentoRow" class="d-flex justify-content-between mb-1" style="font-size:.875rem; color:var(--mm-green); display:none !important;">
+    <span><i class="bi bi-tag-fill me-1"></i>Descuento</span>
+    <span id="descuentoDisplay">−$0.00</span>
+  </div>
+  <div class="d-flex justify-content-between fw-bold" style="font-size:1.05rem;">
+    <span>Total estimado</span>
+    <span id="totalDisplay" style="color:var(--mm-green);">${{ total|floatformat:2 }}</span>
+  </div>
+  <div id="promoInfo" style="font-size:.75rem; color:var(--mm-text-muted); margin-top:.35rem; display:none;"></div>
+</div>
+
+<!-- Actions -->
+<div class="d-flex flex-column gap-2">
+  <button class="btn btn-primary py-3 fw-bold" style="font-size:1rem;" onclick="sendToKitchen()">
+    <i class="bi bi-send-fill me-2"></i>Enviar a cocina
+  </button>
+  <a href="{% url 'cliente:menu' %}" class="btn py-2" style="background:var(--mm-cream-dark); color:var(--mm-text); font-size:.9rem;">
+    Seguir agregando
+  </a>
+</div>
+
+{% endif %}
+</div>
+
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+const CSRF = getCsrf();
+let _promoSeleccionada = null;
+// Copia del carrito serializada por Django para operar en JS sin re-fetch.
+const _CARRITO_ITEMS = {{ carrito_json|safe }};
+
+// Calcular descuentos desde backend (informativo) al cargar la página
+document.addEventListener('DOMContentLoaded', () => calcularDescuentos());
+
+// Renderiza las opciones de radio para elegir entre varias promos elegibles.
+// Cada opción, al seleccionarse, dispara calcularDescuentos() con la promo elegida.
+function _renderOpcionesPromo(elegibles, seleccionada) {
+  const cont = document.getElementById('promoOptions');
+  cont.innerHTML = '';
+  elegibles.forEach(p => {
+    const id = 'promo_opt_' + p.id;
+    const checked = (seleccionada === p.id) ? 'checked' : '';
+    const lbl = document.createElement('label');
+    lbl.style.cssText = 'display:flex;align-items:center;gap:.6rem;padding:.55rem .75rem;border:1.5px solid var(--mm-border);border-radius:var(--radius-sm);background:#fff;cursor:pointer;';
+    lbl.innerHTML = `
+      <input type="radio" name="promo_elegida" id="${id}" value="${p.id}" ${checked}
+             style="accent-color:var(--mm-green);">
+      <div style="flex:1;min-width:0;">
+        <div style="font-weight:700;font-size:.85rem;color:var(--mm-text);">${p.titulo}</div>
+        <div style="font-size:.72rem;color:var(--mm-text-muted);">${p.descripcion || ''}</div>
+      </div>`;
+    lbl.querySelector('input').addEventListener('change', e => {
+      _promoSeleccionada = parseInt(e.target.value);
+      calcularDescuentos();
+    });
+    cont.appendChild(lbl);
+  });
+}
+
+// Consulta al backend el cálculo de descuentos para el carrito actual.
+// Si hay una promo pre-seleccionada la envía; el backend puede sugerir
+// otra si la actual ya no aplica. Actualiza UI de subtotal, descuento y total.
+async function calcularDescuentos() {
+  try {
+    if (!_CARRITO_ITEMS || !_CARRITO_ITEMS.length) return;
+    const body = { items: _CARRITO_ITEMS };
+    if (_promoSeleccionada) body.promocion_id = _promoSeleccionada;
+    const res = await fetch('{% url "cliente:calcular_carrito" %}', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+      body: JSON.stringify(body)
+    });
+    const d = await res.json();
+    if (!d.ok) return;
+
+    // Selector de promos: mostrar si hay más de una elegible
+    const picker = document.getElementById('promoPicker');
+    if (d.promociones_elegibles && d.promociones_elegibles.length > 1) {
+      picker.style.display = 'block';
+      if (_promoSeleccionada == null && d.promocion_seleccionada) {
+        _promoSeleccionada = d.promocion_seleccionada;
+      }
+      _renderOpcionesPromo(d.promociones_elegibles, _promoSeleccionada);
+    } else {
+      picker.style.display = 'none';
+    }
+
+    // Mostrar descuento aplicado
+    const dr = document.getElementById('descuentoRow');
+    const pi = document.getElementById('promoInfo');
+    if (d.descuento > 0.001) {
+      document.getElementById('subtotalDisplay').textContent = '$' + d.subtotal.toFixed(2);
+      document.getElementById('totalDisplay').textContent    = '$' + d.total.toFixed(2);
+      dr.style.display = 'flex';
+      document.getElementById('descuentoDisplay').textContent = '−$' + d.descuento.toFixed(2);
+      if (d.promociones && d.promociones.length) {
+        pi.innerHTML = '<i class="bi bi-tag-fill me-1"></i>' + d.promociones.map(p=>p.titulo).join(', ');
+        pi.style.display = 'block';
+      } else {
+        pi.style.display = 'none';
+      }
+    } else {
+      document.getElementById('subtotalDisplay').textContent = '$' + d.subtotal.toFixed(2);
+      document.getElementById('totalDisplay').textContent    = '$' + d.subtotal.toFixed(2);
+      dr.style.display = 'none';
+      // Aviso si hace falta elegir
+      if (d.requiere_seleccion) {
+        pi.textContent = 'Elige una promoción arriba para aplicar el descuento.';
+        pi.style.display = 'block';
+      } else {
+        pi.style.display = 'none';
+      }
+    }
+  } catch(e) { /* silencioso — no interrumpir la compra */ }
+}
+
+// Elimina un ítem del carrito por su índice de posición y recarga la página
+// para reflejar el nuevo estado (servidor es la fuente de verdad del carrito).
+async function removeItem(index) {
+  const res = await fetch('{% url "cliente:eliminar_carrito" %}', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+    body: JSON.stringify({ index })
+  });
+  const data = await res.json();
+  if (data.ok) location.reload();
+}
+
+// Token de idempotencia: uno por carga de la página del carrito. Si el cliente
+// hace doble-click o el navegador reintenta, el backend reconoce el token y
+// NO crea un segundo pedido (P1).
+const _IDEMPOTENCIA = (crypto.randomUUID && crypto.randomUUID()) ||
+  ('idem-' + Date.now() + '-' + Math.random().toString(36).slice(2));
+let _pedidoEnviado = false;
+
+// Envía el pedido a cocina incluyendo el token de idempotencia y la promo elegida.
+// Bloquea el botón durante la petición y muestra feedback visual de progreso.
+async function sendToKitchen() {
+  if (_pedidoEnviado) return;          // guard extra anti doble-disparo
+  const btn = document.querySelector('button[onclick="sendToKitchen()"]');
+  const htmlOriginal = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Enviando…';
+  try {
+    const payload = { idempotency_key: _IDEMPOTENCIA };
+    if (_promoSeleccionada) payload.promocion_id = _promoSeleccionada;
+    const res = await fetch('{% url "cliente:confirmar_pedido" %}', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if (res.ok && data.ok) {
+      _pedidoEnviado = true;
+      showToast('¡Pedido enviado! La cocina ya lo recibió', 'success');
+      setTimeout(() => { window.location.href = '{% url "cliente:pedidos" %}'; }, 1800);
+    } else {
+      // BUGFIX E2: antes el botón quedaba colgado sin feedback en {ok:false}.
+      showToast(data.error || 'No se pudo enviar el pedido', 'error');
+      if (data.sesion_pagada) {
+        // La cuenta ya fue cerrada: no tiene sentido reintentar aquí.
+        setTimeout(() => { window.location.href = '{% url "cliente:pedidos" %}'; }, 1800);
+      } else {
+        btn.disabled = false;
+        btn.innerHTML = htmlOriginal;
+      }
+    }
+  } catch(e) {
+    showToast('Error de conexión al enviar el pedido', 'error');
+    btn.disabled = false;
+    btn.innerHTML = htmlOriginal;
+  }
+}
+</script>
+{% endblock %}

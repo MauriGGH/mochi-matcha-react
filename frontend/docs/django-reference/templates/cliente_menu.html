@@ -1,0 +1,482 @@
+{# ============================================================================= #}
+{# menu.html — Vista principal del menú para el cliente final.                  #}
+{# Incluye: carrusel de promociones activas (con swipe táctil y autoplay),      #}
+{# pestañas de categoría, cuadrícula de productos y modal de producto           #}
+{# (modificadores, notas, cantidad y agregar al carrito vía AJAX).              #}
+{# ============================================================================= #}
+{% extends "base/cliente_base.html" %}
+{% load static %}
+
+{% block title %}Menú — Mochi Matcha{% endblock %}
+
+{# ── Header del menú: logo + info de mesa/PIN + badge del carrito ── #}
+{% block client_header %}
+<header class="px-3 py-2 d-flex align-items-center justify-content-between"
+        style="background:var(--mm-white); border-bottom:1px solid var(--mm-border); position:sticky; top:0; z-index:50;">
+  <span class="fw-semibold" style="font-size:1rem; color:var(--mm-green); font-family:var(--font-display);"><i class="bi bi-cup-hot-fill me-1"></i>Mochi Matcha</span>
+  <div class="d-flex align-items-center gap-2">
+    <span style="font-size:.78rem; color:var(--mm-text-muted);">
+      Mesa {{ mesa.numero_mesa }} ·
+      <span class="fw-bold" style="font-family:var(--font-mono); color:var(--mm-text);">PIN: {{ pin_mesa }}</span>
+    </span>
+    <a href="{% url 'cliente:carrito' %}" class="position-relative" style="color:var(--mm-text); text-decoration:none;">
+      <i class="bi bi-bag-fill" style="font-size:1.4rem;"></i>
+      <span class="nav-badge" id="cart-badge" style="{% if carrito_count == 0 %}display:none;{% endif %}">{{ carrito_count }}</span>
+    </a>
+  </div>
+</header>
+{% endblock %}
+
+{% block content %}
+
+{# ── Carrusel de Promociones Activas (solo si hay promos vigentes) ── #}
+<!-- Carrusel de Promociones Activas -->
+{% if promos_activas %}
+<div class="mm-carousel-wrapper mx-3 mt-3" id="promoCarouselWrap">
+  <!-- Track -->
+  {# Track del carrusel: desplazamiento horizontal via transform translateX #}
+  <div class="mm-carousel-track" id="promoTrack">
+    {% for promo in promos_activas %}
+    {# Cada slide muestra imagen (opcional), tag "PROMO", título, descripción, productos y vigencia #}
+    <div class="mm-carousel-slide" data-index="{{ forloop.counter0 }}">
+      {% if promo.imagen_efectiva %}
+      <div style="width:100%;max-height:120px;overflow:hidden;border-radius:var(--radius-sm) var(--radius-sm) 0 0;">
+        <img src="{{ promo.imagen_efectiva }}" alt="{{ promo.titulo }}"
+             style="width:100%;height:120px;object-fit:cover;"
+             onerror="this.parentElement.style.display='none'">
+      </div>
+      {% endif %}
+      <div class="mm-carousel-content">
+        <div class="mm-promo-tag"><i class="bi bi-tag-fill me-1"></i>PROMO</div>
+        <div class="mm-promo-titulo">{{ promo.titulo }}</div>
+        <div class="mm-promo-desc">
+          {% if promo.descripcion_corta %}{{ promo.descripcion_corta }}
+          {% elif promo.tipo_descuento %}
+            {% if promo.tipo_descuento.descripcion == "Porcentaje" and promo.valor_descuento %}{{ promo.valor_descuento|floatformat:0 }}% de descuento
+            {% elif promo.tipo_descuento.descripcion == "2x1" %}Compra 2 y paga 1
+            {% elif promo.tipo_descuento.descripcion == "Monto fijo" and promo.valor_descuento %}${{ promo.valor_descuento|floatformat:0 }} de descuento
+            {% else %}Descuento especial{% endif %}
+          {% endif %}
+        </div>
+        {% if promo.productos_aplicables.exists %}
+        <div class="mm-promo-productos">
+          {% for p in promo.productos_aplicables.all|slice:":3" %}{{ p.nombre }}{% if not forloop.last %} · {% endif %}{% endfor %}{% if promo.productos_aplicables.count > 3 %} +más{% endif %}
+        </div>
+        {% endif %}
+        <div class="mm-promo-vigencia">Hasta {{ promo.fecha_fin|date:"d/m/Y" }}</div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+
+  {# Controles y dots de navegación: solo se renderizan si hay más de una promo #}
+  {% if promos_activas|length > 1 %}
+  <!-- Controles -->
+  <button class="mm-carousel-btn mm-carousel-prev" id="promoPrev" aria-label="Anterior">‹</button>
+  <button class="mm-carousel-btn mm-carousel-next" id="promoNext" aria-label="Siguiente">›</button>
+  <!-- Dots -->
+  <div class="mm-carousel-dots" id="promoDots">
+    {% for promo in promos_activas %}
+    <span class="mm-dot {% if forloop.first %}active{% endif %}" data-idx="{{ forloop.counter0 }}"></span>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>
+
+<style>
+.mm-carousel-wrapper {
+  position:relative; background:var(--mm-green,#3D6B4F);
+  border-radius:var(--radius-md,12px); overflow:hidden;
+  color:#fff; user-select:none;
+}
+.mm-carousel-track {
+  display:flex; transition:transform .38s cubic-bezier(.25,.46,.45,.94);
+  will-change:transform;
+}
+.mm-carousel-slide {
+  min-width:100%; flex-shrink:0;
+}
+.mm-carousel-content {
+  padding:.85rem 1.1rem .9rem;
+}
+.mm-promo-tag {
+  display:inline-block; background:rgba(255,255,255,.2);
+  border-radius:4px; padding:.12rem .45rem;
+  font-size:.65rem; font-weight:700; letter-spacing:.05em;
+  margin-bottom:.3rem;
+}
+.mm-promo-titulo {
+  font-size:1rem; font-weight:700; line-height:1.25;
+}
+.mm-promo-desc {
+  font-size:.8rem; opacity:.9; margin-top:.2rem;
+}
+.mm-promo-productos {
+  font-size:.72rem; opacity:.75; margin-top:.2rem;
+}
+.mm-promo-vigencia {
+  font-size:.68rem; opacity:.65; margin-top:.25rem;
+}
+.mm-carousel-btn {
+  position:absolute; top:50%; transform:translateY(-50%);
+  background:rgba(0,0,0,.3); border:none; color:#fff;
+  width:32px; height:32px; border-radius:50%;
+  font-size:1.1rem; line-height:1; cursor:pointer;
+  display:flex; align-items:center; justify-content:center;
+  z-index:10; transition:background .15s; padding:0;
+  backdrop-filter:blur(4px);
+}
+.mm-carousel-btn:hover { background:rgba(0,0,0,.5); }
+.mm-carousel-prev { left:.5rem; }
+.mm-carousel-next { right:.5rem; }
+.mm-carousel-dots {
+  display:flex; justify-content:center; gap:.35rem;
+  padding:.45rem 0 .6rem;
+}
+.mm-dot {
+  width:6px; height:6px; border-radius:50%;
+  background:rgba(255,255,255,.35); cursor:pointer;
+  transition:all .2s; display:inline-block;
+}
+.mm-dot.active {
+  background:#fff; width:18px; border-radius:3px;
+}
+</style>
+<script>
+// IIFE del carrusel de promociones: no contamina el scope global.
+// Solo se inicializa si hay más de una promo (el template ya limita la entrada).
+(function() {
+  'use strict';
+  const total = {{ promos_activas|length }};
+  if (total <= 1) return;
+
+  const track   = document.getElementById('promoTrack');
+  const dots    = document.querySelectorAll('.mm-dot');
+  const prevBtn = document.getElementById('promoPrev');
+  const nextBtn = document.getElementById('promoNext');
+  let current = 0;
+  let autoTimer = null;
+  let startX = 0;
+  let isDragging = false;
+
+  // Navega al slide n (módulo seguro para circular) y actualiza los dots.
+  function goTo(n) {
+    current = ((n % total) + total) % total;
+    track.style.transform = 'translateX(-' + (current * 100) + '%)';
+    dots.forEach((d, i) => d.classList.toggle('active', i === current));
+  }
+
+  function next() { goTo(current + 1); }
+  function prev() { goTo(current - 1); }
+
+  // Autoplay cada 5 s; se reinicia tras cualquier interacción manual.
+  function startAuto() {
+    clearInterval(autoTimer);
+    autoTimer = setInterval(next, 5000);
+  }
+  function resetAuto() { startAuto(); }
+
+  if (prevBtn) prevBtn.addEventListener('click', () => { prev(); resetAuto(); });
+  if (nextBtn) nextBtn.addEventListener('click', () => { next(); resetAuto(); });
+  dots.forEach(d => d.addEventListener('click', () => { goTo(+d.dataset.idx); resetAuto(); }));
+
+  // Swipe / touch: detecta arrastre > 40 px para cambiar de slide.
+  track.addEventListener('touchstart', e => { startX = e.touches[0].clientX; isDragging = true; clearInterval(autoTimer); }, {passive:true});
+  track.addEventListener('touchend', e => {
+    if (!isDragging) return;
+    const diff = e.changedTouches[0].clientX - startX;
+    if (Math.abs(diff) > 40) { diff < 0 ? next() : prev(); }
+    isDragging = false; resetAuto();
+  }, {passive:true});
+
+  startAuto();
+})();
+</script>
+{% endif %}
+
+{# ── Pestañas de categoría: "Todo" más una pestaña por categoría con productos disponibles ── #}
+<!-- Category Tabs -->
+<div class="category-tabs" id="catTabs">
+  <button class="cat-tab active" data-cat="todos" onclick="filterCat('todos', this)">Todo</button>
+  {% for cat in categorias %}
+  {# Solo se incluye la pestaña si la categoría tiene productos disponibles #}
+  {% if cat.productos_disponibles %}
+  <button class="cat-tab" data-cat="cat-{{ cat.id }}" onclick="filterCat('cat-{{ cat.id }}', this)">{{ cat.nombre }}</button>
+  {% endif %}
+  {% endfor %}
+</div>
+
+{# ── Cuadrícula de productos agrupada por categoría ── #}
+<!-- Products Grid -->
+<div class="px-3 pb-4" id="productsContainer">
+  {% for cat in categorias %}
+  {% if cat.productos_disponibles %}
+  {# Sección de categoría: id="cat-X" usado por filterCat() para show/hide #}
+  <div class="category-section mb-4" id="cat-{{ cat.id }}">
+    <h6 class="fw-bold mb-2 mt-2"
+        style="color:var(--mm-text-muted); font-size:.72rem; text-transform:uppercase; letter-spacing:.08em;">
+      {{ cat.nombre }}
+    </h6>
+    <div class="row g-2">
+      {% for prod in cat.productos_disponibles %}
+      <div class="col-6">
+        {# Tarjeta de producto: datos en data-* para evitar re-fetch al abrir el modal #}
+        <div class="product-card"
+             data-id="{{ prod.id }}"
+             data-nombre="{{ prod.nombre|escapejs }}"
+             data-desc="{{ prod.descripcion|default:''|escapejs }}"
+             data-img="{{ prod.imagen_url|default:''|escapejs }}"
+             data-precio="{{ prod.precio }}"
+             data-grupos="{{ prod.grupos_json }}"
+             onclick="openProductModal(this)">
+          {% if prod.imagen_url %}
+          <img src="{{ prod.imagen_url }}" alt="{{ prod.nombre }}" class="product-img" loading="lazy"
+               onerror="this.style.display='none'; this.nextElementSibling.style.display='flex'">
+          <div class="product-img-placeholder" style="display:none;"><i class="bi bi-cup-hot" style="font-size:2rem;color:var(--mm-border);"></i></div>
+          {% else %}
+          <div class="product-img-placeholder"><i class="bi bi-cup-hot" style="font-size:2rem;color:var(--mm-border);"></i></div>
+          {% endif %}
+          <div class="product-body">
+            <div class="product-name">{{ prod.nombre }}</div>
+            {% if prod.descripcion %}
+            <div class="product-desc">{{ prod.descripcion }}</div>
+            {% endif %}
+            <div class="d-flex align-items-center justify-content-between mt-1">
+              <span class="product-price">${{ prod.precio }}</span>
+              <button class="add-btn" onclick="event.stopPropagation(); openProductModal(this.closest('.product-card'))">+</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+  {% endfor %}
+</div>
+
+{# ── Modal de producto: imagen, modificadores, notas, cantidad y CTA de agregar ── #}
+{# Se ancla a la parte inferior de la pantalla (sheet pattern) #}
+<!-- Product Modal -->
+<div class="modal fade" id="productModal" tabindex="-1"
+     style="align-items:flex-end;">
+  <div class="modal-dialog m-0 w-100" style="max-width:430px; margin:0 auto !important;">
+    <div class="modal-content rounded-top-4 rounded-bottom-0 border-0">
+
+      <!-- Product image -->
+      <div style="position:relative;">
+        <img id="modalImg" src="" alt="" class="modal-product-img" style="display:none;">
+        <div id="modalImgPlaceholder" class="product-img-placeholder"
+             style="height:180px; border-radius:var(--radius-md) var(--radius-md) 0 0; display:flex;"><i class="bi bi-cup-hot" style="font-size:2.5rem;color:var(--mm-border);"></i></div>
+        <button type="button" class="btn-close position-absolute"
+                style="top:.75rem; right:.75rem; background:rgba(255,255,255,.9); border-radius:50%; padding:.5rem;"
+                data-bs-dismiss="modal"></button>
+      </div>
+
+      <div class="modal-body px-4 pt-3 pb-2">
+        <h5 class="fw-bold mb-1" id="modalName"></h5>
+        <p id="modalDesc" style="font-size:.875rem; color:var(--mm-text-muted); margin-bottom:.5rem;"></p>
+        <div class="fw-bold mb-3" id="modalBasePrice" style="color:var(--mm-green); font-size:1rem;"></div>
+
+        {# Contenedor de grupos de modificadores: generado dinámicamente por JS #}
+        <!-- Modifier groups -->
+        <div id="modalModifiers"></div>
+
+        <!-- Notes -->
+        <div class="mb-3">
+          <label class="form-label fw-semibold" style="font-size:.85rem;">Notas especiales</label>
+          <textarea id="modalNotes" maxlength="100" data-upper class="form-control rounded-3" rows="2"
+                    placeholder="ej. sin hielo, extra caliente…"
+                    style="font-size:.875rem; border-color:var(--mm-border); resize:none;"></textarea>
+        </div>
+
+        <!-- Quantity -->
+        <div class="d-flex align-items-center justify-content-between mb-2">
+          <span class="fw-semibold" style="font-size:.875rem;">Cantidad</span>
+          <div class="qty-control">
+            <button class="qty-btn" onclick="changeQty(-1)">−</button>
+            <span class="qty-value" id="modalQty">1</span>
+            <button class="qty-btn" onclick="changeQty(1)">+</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer border-0 px-4 pb-4 pt-0 flex-column">
+        <p id="modalValidation" class="text-danger mb-2 w-100" style="font-size:.8rem; display:none;"></p>
+        <button class="btn btn-primary w-100 py-3 fw-bold" id="modalAddBtn" onclick="addToCart()">
+          Añadir — <span id="modalBtnPrice"></span>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+const CSRF = getCsrf();
+let currentProduct = null;  // Producto activo en el modal
+let currentQty = 1;         // Cantidad seleccionada en el modal
+
+// Filtra las secciones de categoría según el tab activo.
+// "todos" muestra todas; cualquier otro catId oculta el resto.
+// Category filter
+function filterCat(catId, btn) {
+  document.querySelectorAll('.cat-tab').forEach(t => t.classList.remove('active'));
+  btn.classList.add('active');
+  document.querySelectorAll('.category-section').forEach(sec => {
+    sec.style.display = (catId === 'todos' || sec.id === catId) ? 'block' : 'none';
+  });
+  // Scroll tabs to show active
+  btn.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+}
+
+// Lee los data-* de la tarjeta de producto, rellena el modal y lo muestra
+// anclado a la parte inferior (bottom sheet). Genera los grupos de modificadores.
+// Product modal
+function openProductModal(card) {
+  const id     = card.dataset.id;
+  const nombre = card.dataset.nombre;
+  const desc   = card.dataset.desc;
+  const img    = card.dataset.img;
+  const precio = parseFloat(card.dataset.precio);
+  let grupos   = [];
+  try { grupos = JSON.parse(card.dataset.grupos || '[]'); } catch(e) {}
+
+  currentProduct = { id, nombre, precio, grupos };
+  currentQty = 1;
+
+  document.getElementById('modalName').textContent = nombre;
+  document.getElementById('modalDesc').textContent = desc;
+  document.getElementById('modalBasePrice').textContent = `$${precio.toFixed(2)}`;
+  document.getElementById('modalQty').textContent = 1;
+  document.getElementById('modalNotes').value = '';
+  document.getElementById('modalValidation').style.display = 'none';
+
+  if (img) {
+    const imgEl = document.getElementById('modalImg');
+    imgEl.src = img;
+    imgEl.style.display = 'block';
+    document.getElementById('modalImgPlaceholder').style.display = 'none';
+    imgEl.onerror = () => { imgEl.style.display='none'; document.getElementById('modalImgPlaceholder').style.display='flex'; };
+  } else {
+    document.getElementById('modalImg').style.display = 'none';
+    document.getElementById('modalImgPlaceholder').style.display = 'flex';
+  }
+
+  // Genera dinámicamente los grupos de modificadores (radio o checkbox
+  // según g.tipo) con su etiqueta de precio extra o "Gratis".
+  // Render modifier groups
+  const modContainer = document.getElementById('modalModifiers');
+  modContainer.innerHTML = '';
+  grupos.forEach(g => {
+    const wrap = document.createElement('div');
+    wrap.className = 'modifier-group';
+    const req = g.es_obligatorio ? ' <span class="text-danger">*</span>' : '';
+    const hint = g.tipo === 'múltiple' && g.max_selecciones ? ` · máx. ${g.max_selecciones}` : '';
+    wrap.innerHTML = `<div class="modifier-group-title">${g.nombre_grupo}${req}<span style="font-size:.75rem;font-weight:400;color:var(--mm-text-muted);">${hint}</span></div>`;
+    g.opciones.forEach(op => {
+      const inputType = g.tipo === 'única' ? 'radio' : 'checkbox';
+      const extraStr  = op.precio_extra > 0 ? `+$${op.precio_extra.toFixed(2)}` : 'Gratis';
+      const extraCls  = op.precio_extra > 0 ? 'modifier-extra' : '';
+      const label = document.createElement('label');
+      label.className = 'modifier-option';
+      label.innerHTML = `
+        <input type="${inputType}" name="mod_${g.id}" value="${op.id}" data-extra="${op.precio_extra}" onchange="updatePrice()">
+        <span style="font-size:.875rem;">${op.nombre_opcion}</span>
+        <span class="${extraCls}" style="font-size:.78rem;">${extraStr}</span>`;
+      wrap.appendChild(label);
+    });
+    modContainer.appendChild(wrap);
+  });
+
+  updatePrice();
+  // Show modal anchored to bottom
+  const modal = new bootstrap.Modal(document.getElementById('productModal'), { backdrop: true });
+  document.getElementById('productModal').style.display = 'flex';
+  document.getElementById('productModal').style.alignItems = 'flex-end';
+  modal.show();
+}
+
+// Recalcula el precio total del modal sumando los extras de modificadores
+// marcados y multiplicando por la cantidad actual; actualiza el botón CTA.
+function updatePrice() {
+  let extra = 0;
+  document.querySelectorAll('#modalModifiers input:checked').forEach(el => {
+    extra += parseFloat(el.dataset.extra || 0);
+  });
+  const total = (currentProduct.precio + extra) * currentQty;
+  document.getElementById('modalBtnPrice').textContent = `$${total.toFixed(2)}`;
+}
+
+// Incrementa o decrementa la cantidad del modal (mínimo 1) y actualiza el precio.
+function changeQty(delta) {
+  currentQty = Math.max(1, currentQty + delta);
+  document.getElementById('modalQty').textContent = currentQty;
+  updatePrice();
+}
+
+// Valida que todos los grupos obligatorios estén seleccionados, luego envía
+// el ítem al carrito vía AJAX y actualiza el badge del carrito sin recargar.
+async function addToCart() {
+  // Validate required groups
+  const grupos = currentProduct.grupos || [];
+  for (const g of grupos) {
+    if (g.es_obligatorio) {
+      const checked = document.querySelector(`#modalModifiers input[name="mod_${g.id}"]:checked`);
+      if (!checked) {
+        const v = document.getElementById('modalValidation');
+        v.textContent = `Selecciona una opción en "${g.nombre_grupo}"`;
+        v.style.display = 'block';
+        return;
+      }
+    }
+  }
+  document.getElementById('modalValidation').style.display = 'none';
+
+  const modificadores = [];
+  document.querySelectorAll('#modalModifiers input:checked').forEach(el => {
+    modificadores.push(parseInt(el.value));
+  });
+  const notas = document.getElementById('modalNotes').value.trim();
+
+  const btn = document.getElementById('modalAddBtn');
+  btn.disabled = true;
+  btn.textContent = 'Agregando…';
+
+  try {
+    const res = await fetch('{% url "cliente:agregar_carrito" %}', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+      body: JSON.stringify({
+        producto_id: currentProduct.id,
+        cantidad: currentQty,
+        modificadores,
+        notas
+      })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      bootstrap.Modal.getInstance(document.getElementById('productModal')).hide();
+      const badge = document.getElementById('cart-badge');
+      badge.textContent = data.carrito_count;
+      badge.style.display = data.carrito_count > 0 ? 'flex' : 'none';
+      showToast(`${currentProduct.nombre} agregado`, 'success');
+    } else if (data.sesion_pagada) {
+      // 1.4: tu cuenta ya fue pagada. Sigue navegando, pero no se aceptan
+      // nuevos productos. El cliente eligió "Seguir viendo" o llegó vía nav.
+      showToast(data.error || 'Tu cuenta ya fue pagada. No se pueden agregar más productos.', 'info');
+    } else {
+      showToast(data.error || 'Error al agregar', 'error');
+    }
+  } catch(e) {
+    showToast('Error de conexión', 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = 'Añadir — <span id="modalBtnPrice"></span>';
+    updatePrice();
+  }
+}
+</script>
+{% endblock %}

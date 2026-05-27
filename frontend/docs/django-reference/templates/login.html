@@ -1,0 +1,277 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Acceso — {{ rol_display }} · Mochi Matcha</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500;600;700&family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+  <link href="{% static 'css/mochi.css' %}" rel="stylesheet">
+  <style>
+    html, body {
+      height: 100%;
+      margin: 0;
+      font-family: var(--font-body);
+    }
+    body {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      min-height: 100vh;
+      background: var(--mm-cream);
+    }
+
+    /* ── Panel izquierdo: branding ─────────────────────────── */
+    .login-brand {
+      background: linear-gradient(160deg, var(--mm-green-dark) 0%, var(--mm-green) 55%, var(--mm-green-light) 100%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 3rem;
+      position: relative;
+      overflow: hidden;
+    }
+    .login-brand::before {
+      content: '';
+      position: absolute;
+      width: 420px; height: 420px;
+      border-radius: 50%;
+      background: rgba(255,255,255,.04);
+      top: -100px; left: -80px;
+    }
+    .login-brand::after {
+      content: '';
+      position: absolute;
+      width: 300px; height: 300px;
+      border-radius: 50%;
+      background: rgba(255,255,255,.04);
+      bottom: -60px; right: -60px;
+    }
+    .brand-icon {
+      width: 80px; height: 80px;
+      background: rgba(255,255,255,.12);
+      border: 1px solid rgba(255,255,255,.18);
+      border-radius: var(--radius-xl);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 2.4rem;
+      margin-bottom: 1.75rem;
+      position: relative; z-index: 1;
+      backdrop-filter: blur(8px);
+    }
+    .brand-title {
+      font-family: var(--font-display);
+      font-size: 2rem;
+      font-weight: 700;
+      color: #fff;
+      text-align: center;
+      line-height: 1.2;
+      position: relative; z-index: 1;
+      margin-bottom: .5rem;
+    }
+    .brand-sub {
+      font-size: .85rem;
+      color: rgba(255,255,255,.6);
+      text-align: center;
+      position: relative; z-index: 1;
+      letter-spacing: .03em;
+    }
+    .brand-divider {
+      width: 40px; height: 2px;
+      background: rgba(255,255,255,.25);
+      border-radius: 99px;
+      margin: 1.5rem auto;
+      position: relative; z-index: 1;
+    }
+    .brand-role-pill {
+      background: rgba(255,255,255,.12);
+      border: 1px solid rgba(255,255,255,.18);
+      border-radius: var(--radius-pill);
+      padding: .45rem 1.25rem;
+      font-size: .82rem;
+      font-weight: 600;
+      color: rgba(255,255,255,.9);
+      display: inline-flex;
+      align-items: center;
+      gap: .5rem;
+      position: relative; z-index: 1;
+      letter-spacing: .02em;
+    }
+
+    /* ── Panel derecho: formulario ─────────────────────────── */
+    .login-form-panel {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 3rem 2.5rem;
+      background: var(--mm-white);
+    }
+    .login-form-wrap {
+      width: 100%;
+      max-width: 380px;
+    }
+    .login-form-title {
+      font-size: 1.35rem;
+      font-weight: 700;
+      color: var(--mm-text);
+      margin-bottom: .35rem;
+    }
+    .login-form-sub {
+      font-size: .84rem;
+      color: var(--mm-text-muted);
+      margin-bottom: 2rem;
+    }
+    .form-label {
+      font-size: .82rem;
+      font-weight: 600;
+      color: var(--mm-text);
+      margin-bottom: .4rem;
+    }
+    .input-group-text {
+      background: var(--mm-cream);
+      border-color: var(--mm-border);
+      color: var(--mm-text-muted);
+    }
+    .form-control {
+      border-color: var(--mm-border);
+      border-radius: 0;
+      padding: .65rem .9rem;
+      font-size: .9rem;
+      color: var(--mm-text);
+      background: var(--mm-white);
+    }
+    .form-control:focus {
+      border-color: var(--mm-green);
+      box-shadow: 0 0 0 3px rgba(61,107,79,.1);
+      background: var(--mm-white);
+    }
+    .form-control::placeholder { color: var(--mm-text-muted); opacity: .6; }
+    .input-group > .form-control:last-child { border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
+    .input-group > .form-control:not(:last-child) { border-right: none; }
+    .input-group > .input-group-text:first-child { border-radius: var(--radius-sm) 0 0 var(--radius-sm); }
+    .btn-toggle-pass {
+      background: var(--mm-cream);
+      border-color: var(--mm-border);
+      border-left: none;
+      border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+      color: var(--mm-text-muted);
+      padding: 0 .75rem;
+      cursor: pointer;
+    }
+    .btn-toggle-pass:hover { background: var(--mm-cream-dark); color: var(--mm-green); }
+    .btn-login {
+      background: var(--mm-green);
+      color: #fff;
+      border: none;
+      border-radius: var(--radius-sm);
+      padding: .8rem 1.5rem;
+      font-size: .95rem;
+      font-weight: 600;
+      width: 100%;
+      transition: background .2s, transform .15s, box-shadow .2s;
+      box-shadow: 0 4px 14px rgba(61,107,79,.25);
+    }
+    .btn-login:hover {
+      background: var(--mm-green-dark);
+      transform: translateY(-1px);
+      box-shadow: 0 6px 20px rgba(61,107,79,.35);
+    }
+    .btn-login:active { transform: none; }
+    .login-footer {
+      font-size: .75rem;
+      color: var(--mm-text-muted);
+      text-align: center;
+      margin-top: 2rem;
+    }
+
+    /* ── Responsive: una sola columna en móvil ─────────────── */
+    @media (max-width: 768px) {
+      body { grid-template-columns: 1fr; }
+      .login-brand { display: none; }
+      .login-form-panel { padding: 2.5rem 1.5rem; background: var(--mm-cream); }
+      .login-form-wrap { max-width: 100%; }
+    }
+  </style>
+</head>
+<body>
+
+{# ── Panel de branding (izquierda) ── #}
+<div class="login-brand">
+  <div class="brand-icon">
+    <i class="bi bi-cup-hot-fill" style="color:#fff;"></i>
+  </div>
+  <div class="brand-title">Mochi Matcha</div>
+  <div class="brand-sub">Sistema de pedidos</div>
+  <div class="brand-divider"></div>
+  <div class="brand-role-pill">
+    {% if rol == 'mesero' %}<i class="bi bi-person-badge-fill"></i>
+    {% elif rol == 'gerente' %}<i class="bi bi-briefcase-fill"></i>
+    {% elif rol == 'cocina' %}<i class="bi bi-fire"></i>
+    {% else %}<i class="bi bi-shield-lock-fill"></i>{% endif %}
+    {{ rol_display }}
+  </div>
+</div>
+
+{# ── Panel del formulario (derecha) ── #}
+<div class="login-form-panel">
+  <div class="login-form-wrap">
+
+    <p class="login-form-title">Iniciar sesión</p>
+    <p class="login-form-sub">Ingresa tus credenciales para acceder al sistema.</p>
+
+    {% if error %}
+    <div class="alert py-2 px-3 mb-4 rounded-3 d-flex align-items-center gap-2"
+         style="background:#FEE8E6; color:var(--mm-danger); border:1px solid rgba(192,57,43,.15); font-size:.85rem;">
+      <i class="bi bi-exclamation-circle-fill"></i>
+      {{ error }}
+    </div>
+    {% endif %}
+
+    <form method="post" action="{{ form_action }}">
+      {% csrf_token %}
+
+      <div class="mb-3">
+        <label class="form-label">Usuario</label>
+        <div class="input-group">
+          <span class="input-group-text"><i class="bi bi-person"></i></span>
+          <input type="text" name="usuario" id="usuarioInput" class="form-control" required
+                 placeholder="Tu nombre de usuario" autocomplete="username"
+                 value="{{ usuario_previo|default:'' }}">
+        </div>
+      </div>
+
+      <div class="mb-4">
+        <label class="form-label">Contraseña</label>
+        <div class="input-group">
+          <span class="input-group-text"><i class="bi bi-lock"></i></span>
+          <input type="password" name="contrasena" id="passInput" class="form-control" required
+                 placeholder="••••••••" autocomplete="current-password">
+          <button type="button" class="btn-toggle-pass" onclick="togglePass()">
+            <i class="bi bi-eye" id="passEye"></i>
+          </button>
+        </div>
+      </div>
+
+      <button type="submit" class="btn-login">
+        Entrar <i class="bi bi-arrow-right-short" style="font-size:1.1rem;"></i>
+      </button>
+    </form>
+
+    <p class="login-footer">
+      <i class="bi bi-shield-check me-1"></i>Acceso restringido al personal autorizado
+    </p>
+  </div>
+</div>
+
+<script>
+function togglePass() {
+  const i = document.getElementById('passInput');
+  const e = document.getElementById('passEye');
+  i.type = i.type === 'password' ? 'text' : 'password';
+  e.className = i.type === 'password' ? 'bi bi-eye' : 'bi bi-eye-slash';
+}
+</script>
+</body>
+</html>

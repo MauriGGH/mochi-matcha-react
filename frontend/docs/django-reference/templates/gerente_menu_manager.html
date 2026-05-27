@@ -1,0 +1,2078 @@
+{# ============================================================= #}
+{# Template principal: Gestión de Menú (multi-vista)            #}
+{# Variable "vista" controla qué sección se renderiza:          #}
+{#   productos | categorias | modificadores | promociones | mesas #}
+{# ============================================================= #}
+{% extends "base/staff_base.html" %}
+{% load static %}
+{% block title %}Gestión de Menú{% endblock %}
+{% block page_title %}Gestión de Menú{% endblock %}
+{# ── Navegación lateral: enlaces del módulo de gerente ── #}
+{% block sidebar_nav %}
+<a href="{% url 'gerente:floor_plan' %}"><i class="bi bi-grid-fill"></i> Floor Plan</a>
+<div class="nav-section-label">Gestión</div>
+<a href="{% url 'gerente:productos' %}" class="active"><i class="bi bi-basket-fill"></i> Gestión de Menú</a>
+<div class="nav-section-label">Reportes</div>
+<a href="{% url 'gerente:reportes' %}"><i class="bi bi-bar-chart-fill"></i> Reportes</a>
+<div class="nav-section-label">Admin</div>
+<a href="{% url 'gerente:empleados' %}"><i class="bi bi-people-fill"></i> Empleados</a>
+<a href="{% url 'gerente:configuracion' %}"><i class="bi bi-gear-fill"></i> Configuración</a>
+{% endblock %}
+{# ── Recursos extra: CSS y JS de Cropper.js (recorte de imágenes) ── #}
+{% block extra_head %}
+<link href="https://cdn.jsdelivr.net/npm/cropperjs@1.5.13/dist/cropper.min.css" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/cropperjs@1.5.13/dist/cropper.min.js" defer></script>
+<style>
+/* ─── Pestañas de navegación entre vistas (2.2: sombreado activo) ─── */
+.mm-tab{position:relative;padding:.65rem 1.25rem;font-size:.875rem;font-weight:600;text-decoration:none;border-bottom:2px solid transparent;color:var(--mm-text-muted);margin-bottom:-2px;display:inline-block;border-radius:var(--radius-sm) var(--radius-sm) 0 0;transition:background .15s,color .15s;}
+.mm-tab:hover{color:var(--mm-green);background:var(--mm-cream);}
+.mm-tab.active{
+  border-bottom-color:var(--mm-green);
+  color:var(--mm-green);
+  background:var(--mm-green-pale,#e9efe7);
+  box-shadow:inset 0 -2px 0 var(--mm-green), 0 -1px 4px rgba(61,107,79,.08);
+}
+.mm-tab.active::before{
+  content:"";
+  position:absolute;
+  left:.85rem; right:.85rem; top:0;
+  height:3px; border-radius:0 0 3px 3px;
+  background:var(--mm-gold,#C9933A);
+}
+/* ─── Tarjeta de sección genérica (.sc) ─── */
+.sc{background:var(--mm-white);border:1px solid var(--mm-border);border-radius:var(--radius-md);padding:1.25rem;margin-bottom:1rem;}
+/* ─── Drag-and-drop de imágenes ─── */
+.mm-dropzone{position:relative;border:2px dashed var(--mm-border);border-radius:var(--radius-md);padding:.75rem;background:var(--mm-cream);text-align:center;cursor:pointer;transition:all .15s;display:flex;align-items:center;justify-content:center;min-height:90px;gap:.75rem;}
+.mm-dropzone:hover,.mm-dropzone.is-drag{border-color:var(--mm-green);background:var(--mm-green-pale,#e9efe7);}
+.mm-dropzone.is-busy{opacity:.6;pointer-events:none;}
+.mm-dz-text{display:flex;flex-direction:column;align-items:center;gap:.25rem;color:var(--mm-text-muted);}
+.mm-dz-link{color:var(--mm-green);font-weight:600;text-decoration:underline;cursor:pointer;}
+.mm-dz-preview{max-height:80px;max-width:120px;border-radius:var(--radius-sm,6px);object-fit:cover;border:1px solid var(--mm-border);}
+.mm-dz-error{color:var(--mm-danger,#dc3545);font-size:.75rem;margin-top:.4rem;}
+/* ─── Galería de imágenes: cards con thumb, nombre y acciones ─── */
+.gal-card{position:relative;border:1px solid var(--mm-border);border-radius:var(--radius-sm,8px);overflow:hidden;background:var(--mm-white);cursor:pointer;transition:all .15s;}
+.gal-card:hover{border-color:var(--mm-green);box-shadow:0 4px 12px rgba(0,0,0,.08);transform:translateY(-1px);}
+.gal-thumb{width:100%;aspect-ratio:4/3;object-fit:cover;display:block;background:var(--mm-cream);}
+.gal-info{padding:.4rem .5rem;font-size:.7rem;}
+.gal-name{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--mm-text);}
+.gal-meta{color:var(--mm-text-muted);font-size:.65rem;margin-top:.1rem;display:flex;justify-content:space-between;}
+.gal-action{position:absolute;top:.3rem;width:24px;height:24px;border:none;border-radius:50%;color:#fff;font-size:.7rem;display:flex;align-items:center;justify-content:center;cursor:pointer;opacity:0;transition:opacity .15s;z-index:2;}
+.gal-card:hover .gal-action{opacity:1;}
+.gal-del{right:.3rem;background:rgba(220,53,69,.92);}
+.gal-crop{right:2rem;background:rgba(61,107,79,.92);}
+/* ─── Cropper.js: ajustes de tamaño dentro del modal ─── */
+/* Cropper.js: limitar altura para que entre en el modal */
+.cropper-container{max-height:60vh;}
+#cropSource{max-width:100%;height:auto;display:block;}
+/* Preview area de Cropper requiere overflow hidden y width/height fijos */
+.cropper-preview-mm{overflow:hidden;background:var(--mm-cream,#faf7f2);display:block;}
+
+/* ─── Mocks de previsualización en el modal de recorte ─── */
+/* ─── Mock realista: card de producto (replica static/css/cliente.css) ── */
+.mock-product-card{background:var(--mm-white,#fff);border-radius:12px;border:1px solid var(--mm-border,#e5e0d8);overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.05);max-width:220px;margin:0 auto;}
+.mock-product-img{width:100%;aspect-ratio:4/3;}
+.mock-product-body{padding:.75rem;}
+.mock-product-name{font-weight:600;font-size:.9rem;margin-bottom:.2rem;color:var(--mm-text,#1c1c1c);}
+.mock-product-desc{font-size:.72rem;color:var(--mm-text-muted,#888);margin-bottom:.5rem;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
+.mock-product-price{font-weight:700;color:var(--mm-green,#3D6B4F);font-size:.95rem;}
+.mock-add-btn{width:28px;height:28px;background:var(--mm-green,#3D6B4F);color:#fff;border:none;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:1rem;font-weight:700;}
+
+/* ─── Mock realista: banner del carrusel de promos ── */
+.mock-promo-carousel{background:var(--mm-green,#3D6B4F);border-radius:12px;overflow:hidden;color:#fff;max-width:300px;margin:0 auto;}
+.mock-promo-img{width:100%;aspect-ratio:3/1;}
+.mock-promo-content{padding:.7rem .9rem;}
+.mock-promo-tag{display:inline-block;background:rgba(255,255,255,.2);border-radius:4px;padding:.1rem .4rem;font-size:.6rem;font-weight:700;letter-spacing:.05em;margin-bottom:.25rem;}
+.mock-promo-title{font-size:.95rem;font-weight:700;line-height:1.2;}
+.mock-promo-desc{font-size:.72rem;opacity:.9;margin-top:.15rem;}
+
+/* ─── Mock de galería: ratio libre, sin chrome adicional ─── */
+/* Galería: ratio libre */
+.mock-galeria-img{width:100%;aspect-ratio:4/3;border-radius:6px;border:1px solid var(--mm-border);}
+</style>
+{% endblock %}
+{% block content %}
+{# ── Encabezado de página ── #}
+<div class="d-flex align-items-center justify-content-between mb-3">
+  <h5 class="fw-bold mb-0">Gestión de Menú</h5>
+</div>
+{# ── Barra de pestañas: cambia la variable "vista" mediante URL ── #}
+<div style="display:flex;border-bottom:2px solid var(--mm-border);margin-bottom:1.5rem;overflow-x:auto;">
+  <a href="{% url 'gerente:productos' %}" class="mm-tab {% if vista == 'productos' %}active{% endif %}">Productos</a>
+  <a href="{% url 'gerente:categorias' %}" class="mm-tab {% if vista == 'categorias' %}active{% endif %}">Categorías</a>
+  <a href="{% url 'gerente:modificadores' %}" class="mm-tab {% if vista == 'modificadores' %}active{% endif %}">Modificadores</a>
+  <a href="{% url 'gerente:promociones' %}" class="mm-tab {% if vista == 'promociones' %}active{% endif %}">Promociones</a>
+  <a href="{% url 'gerente:mesas_crud' %}" class="mm-tab {% if vista == 'mesas' %}active{% endif %}">Mesas</a>
+</div>
+
+{# ════════════════════════════════════════════════════════════ #}
+{# VISTA: PRODUCTOS                                             #}
+{# Tabla filtrable de productos con búsqueda por nombre y      #}
+{# categoría. Permite editar, activar/desactivar cada producto. #}
+{# ════════════════════════════════════════════════════════════ #}
+{% if vista == 'productos' %}
+{# ── Barra de filtros y botón "Nuevo producto" ── #}
+<div class="d-flex align-items-center justify-content-between mb-3 flex-wrap gap-2">
+  <div class="d-flex gap-2 flex-wrap">
+    <input type="text" id="searchProd" class="form-control form-control-sm" placeholder="Buscar producto…" style="width:200px;border-color:var(--mm-border);" oninput="filterProducts()">
+    <select id="filterCat" class="form-select form-select-sm" style="width:170px;border-color:var(--mm-border);" onchange="filterProducts()">
+      <option value="">Todas las categorías</option>
+      {% for cat in categorias %}<option value="{{ cat.id }}">{{ cat.nombre }}</option>{% endfor %}
+    </select>
+  </div>
+  <button class="btn btn-primary btn-sm rounded-pill px-3" onclick="openNewProduct()"><i class="bi bi-plus-lg me-1"></i>Nuevo producto</button>
+</div>
+{# ── Tabla de productos: imagen, nombre, categoría, precio, estado y acciones ── #}
+<div class="table-responsive">
+  <table class="table data-table">
+    <thead><tr><th style="width:52px;">IMG</th><th>PRODUCTO</th><th>CATEGORÍA</th><th>PRECIO</th><th>ESTADO</th><th>ACCIONES</th></tr></thead>
+    <tbody id="productsTable">
+{# ── Filas de productos: data-name y data-cat permiten filtrado JS en cliente ── #}
+      {% for prod in productos %}
+      <tr data-name="{{ prod.nombre|lower }}" data-cat="{{ prod.categoria.id }}">
+        <td>
+          {% if prod.imagen_url %}<img src="{{ prod.imagen_url }}" style="width:40px;height:40px;object-fit:cover;border-radius:8px;" onerror="this.style.display='none'" alt="">
+          {% else %}<div style="width:40px;height:40px;background:var(--mm-cream-dark);border-radius:8px;display:flex;align-items:center;justify-content:center;"><i class="bi bi-cup-hot" style="font-size:1.2rem;color:var(--mm-text-muted);"></i></div>{% endif %}
+        </td>
+        <td><div style="font-weight:600;font-size:.875rem;">{{ prod.nombre }}</div>{% if prod.descripcion %}<div style="font-size:.75rem;color:var(--mm-text-muted);">{{ prod.descripcion|truncatechars:50 }}</div>{% endif %}</td>
+        <td><span style="background:var(--mm-cream-dark);padding:.2rem .6rem;border-radius:99px;font-size:.78rem;">{{ prod.categoria.nombre }}</span></td>
+        <td style="font-weight:700;">${{ prod.precio }}</td>
+        <td>
+          {% if prod.disponible %}<span style="background:#EAFAF1;color:#1E8449;border-radius:99px;padding:.2rem .7rem;font-size:.75rem;font-weight:700;"><i class="bi bi-check-circle-fill me-1"></i>Activo</span>
+          {% else %}<span style="background:#F2F3F4;color:#566573;border-radius:99px;padding:.2rem .7rem;font-size:.75rem;font-weight:700;"><i class="bi bi-x-circle me-1"></i>Agotado</span>{% endif %}
+        </td>
+        <td>
+          <button class="btn btn-link btn-sm p-1" title="Editar" onclick="openEditProduct({{ prod.id }},'{{ prod.nombre|escapejs }}','{{ prod.descripcion|default:''|escapejs }}','{{ prod.precio }}','{{ prod.categoria.id }}',{{ prod.disponible|yesno:'true,false' }},'{{ prod.imagen_url|default:''|escapejs }}')"><i class="bi bi-pencil" style="color:var(--mm-text-muted);"></i></button>
+          <button class="btn btn-link btn-sm p-1" onclick="toggleProduct({{ prod.id }}, {{ prod.disponible|yesno:'true,false' }})" title="{% if prod.disponible %}Desactivar (el historial se conserva){% else %}Activar{% endif %}"><i class="bi bi-{% if prod.disponible %}eye-slash{% else %}eye{% endif %}" style="color:{% if prod.disponible %}var(--mm-danger){% else %}var(--mm-green){% endif %};"></i></button>
+        </td>
+      </tr>
+      {% empty %}<tr><td colspan="6" class="text-center py-5" style="color:var(--mm-text-muted);"><i class="bi bi-cart3" style="font-size:2rem;display:block;margin-bottom:.5rem;"></i>No hay productos aún.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+{# ════════════════════════════════════════════════════════════ #}
+{# VISTA: CATEGORÍAS                                            #}
+{# Tarjetas con cada categoría del menú. Permite crear, editar  #}
+{# y eliminar. Cada categoría tiene un área KDS (Cocina/Bar).  #}
+{# ════════════════════════════════════════════════════════════ #}
+{% if vista == 'categorias' %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <p style="font-size:.875rem;color:var(--mm-text-muted);margin:0;">Define las secciones del menú y el área del KDS (Cocina o Bar).</p>
+  <button class="btn btn-primary btn-sm rounded-pill px-3" onclick="document.getElementById('newCatForm').style.display='block'"><i class="bi bi-plus-lg me-1"></i>Nueva categoría</button>
+</div>
+{# ── Formulario inline de nueva categoría (oculto por defecto) ── #}
+<div id="newCatForm" style="display:none;" class="sc" style="border-color:var(--mm-green);background:var(--mm-green-pale);">
+  <h6 class="fw-bold mb-3">Nueva categoría</h6>
+  <form method="post" action="{% url 'gerente:categorias' %}">{% csrf_token %}
+    <div class="row g-3 align-items-end">
+      <div class="col-md-4"><label class="form-label fw-semibold" style="font-size:.85rem;">Nombre *</label><input type="text" name="nombre" required maxlength="100" data-upper class="form-control" style="border-color:var(--mm-border);" placeholder="ej. Matcha &amp; Té"></div>
+      <div class="col-md-3"><label class="form-label fw-semibold" style="font-size:.85rem;">Área KDS</label><select name="area" class="form-select" style="border-color:var(--mm-border);"><option value="ambos">Ambos</option><option value="cocina">Solo Cocina</option><option value="bar">Solo Bar</option></select></div>
+      <div class="col-md-2"><label class="form-label fw-semibold" style="font-size:.85rem;">Orden</label><input type="number" name="orden" value="0" class="form-control" style="border-color:var(--mm-border);"></div>
+      <div class="col-md-3 d-flex gap-2"><button type="submit" class="btn btn-primary flex-grow-1">Guardar</button><button type="button" class="btn" style="background:var(--mm-cream-dark);" onclick="document.getElementById('newCatForm').style.display='none'">×</button></div>
+    </div>
+  </form>
+</div>
+{# ── Grid de tarjetas de categorías ── #}
+<div class="row g-3 mt-1">
+  {% for cat in categorias %}
+  <div class="col-md-6 col-lg-4">
+    <div class="sc" style="padding:1rem;">
+      <div class="d-flex justify-content-between align-items-start">
+        <div>
+          <div style="font-weight:700;font-size:.95rem;">{{ cat.nombre }}</div>
+          <div style="font-size:.75rem;color:var(--mm-text-muted);margin-top:.2rem;">Orden: {{ cat.orden }} · <span style="background:var(--mm-cream-dark);padding:.1rem .4rem;border-radius:99px;">{{ cat.area }}</span></div>
+          <div style="font-size:.75rem;color:var(--mm-text-muted);margin-top:.2rem;">{{ cat.productos.count }} productos</div>
+        </div>
+        <div class="d-flex gap-1">
+          <button class="btn btn-link btn-sm p-0" style="color:var(--mm-text-muted);" title="Editar"
+                  onclick="editarCategoria({{ cat.id }}, '{{ cat.nombre|escapejs }}', {{ cat.orden }}, '{{ cat.area }}')">
+            <i class="bi bi-pencil"></i>
+          </button>
+          <button class="btn btn-link btn-sm p-0" style="color:var(--mm-danger);" title="Eliminar"
+                  onclick="deleteCategoria({{ cat.id }},'{{ cat.nombre|escapejs }}')"><i class="bi bi-trash3"></i></button>
+        </div>
+      </div>
+    </div>
+  </div>
+  {% empty %}<div class="col-12 text-center py-5" style="color:var(--mm-text-muted);"><i class="bi bi-tags" style="font-size:2rem;display:block;margin-bottom:.5rem;"></i><p>No hay categorías aún.</p></div>{% endfor %}
+</div>
+{% endif %}
+
+{# ════════════════════════════════════════════════════════════ #}
+{# VISTA: MODIFICADORES                                         #}
+{# Grupos de opciones vinculados a productos (leche, tamaño…). #}
+{# Soporta tipo única/múltiple, grupos obligatorios y plantillas.#}
+{# ════════════════════════════════════════════════════════════ #}
+{% if vista == 'modificadores' %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <p style="font-size:.875rem;color:var(--mm-text-muted);margin:0;">Grupos de opciones asociados a productos (leche, tamaño, extras…).</p>
+  <button class="btn btn-primary btn-sm rounded-pill px-3" onclick="openNewModificador()"><i class="bi bi-plus-lg me-1"></i>Nuevo grupo</button>
+</div>
+{# ── Buscador de grupos por nombre o producto asociado ── #}
+<div class="mb-3">
+  <input type="text" id="searchMod" class="form-control form-control-sm"
+    placeholder="Buscar por nombre del grupo o producto asociado…"
+    style="border-color:var(--mm-border);"
+    oninput="filterModificadores()">
+</div>
+{# ── Lista de grupos de modificadores; data-* permiten filtrado JS ── #}
+{% for grupo in grupos %}
+<div class="sc mod-card"
+     data-mod-nombre="{{ grupo.nombre_grupo|lower }}"
+     data-mod-productos="{% for p in grupo.productos.all %}{{ p.nombre|lower }} {% endfor %}">
+  <div class="d-flex justify-content-between align-items-start mb-2">
+    <div>
+      <div style="font-weight:700;font-size:.95rem;">{{ grupo.nombre_grupo }}</div>
+      <div style="font-size:.78rem;color:var(--mm-text-muted);margin-top:.2rem;">Productos: <strong>{% for p in grupo.productos.all %}{{ p.nombre }}{% if not forloop.last %}, {% endif %}{% empty %}—{% endfor %}</strong> · Tipo: {{ grupo.tipo }} · {% if grupo.es_obligatorio %}<span style="color:var(--mm-danger);font-weight:600;">Obligatorio</span>{% else %}Opcional{% endif %}{% if grupo.max_selecciones %} · Máx. {{ grupo.max_selecciones }}{% endif %}</div>
+    </div>
+    <div class="d-flex gap-1">
+      <button class="btn btn-link btn-sm p-0" style="color:var(--mm-info);" onclick="editarGrupo({{ grupo.id }})" title="Editar grupo"><i class="bi bi-pencil"></i></button>
+      <button class="btn btn-link btn-sm p-0" style="color:{% if grupo.es_plantilla %}var(--mm-gold){% else %}var(--mm-text-muted){% endif %};" onclick="togglePlantilla({{ grupo.id }}, this)" title="{% if grupo.es_plantilla %}Quitar plantilla{% else %}Marcar como plantilla{% endif %}"><i class="bi bi-bookmark{% if grupo.es_plantilla %}-fill{% endif %}"></i></button>
+      <button class="btn btn-link btn-sm p-0" style="color:var(--mm-danger);" onclick="deleteGrupo({{ grupo.id }})"><i class="bi bi-trash3"></i></button>
+    </div>
+  </div>
+  <div class="d-flex flex-wrap gap-2">
+    {% for op in grupo.opciones.all %}
+    <span style="background:var(--mm-cream-dark);border-radius:99px;padding:.25rem .8rem;font-size:.8rem;">{{ op.nombre_opcion }}{% if op.precio_extra > 0 %} <span style="color:var(--mm-gold);font-weight:600;">+${{ op.precio_extra }}</span>{% else %} <span style="color:var(--mm-success);">Gratis</span>{% endif %}</span>
+    {% endfor %}
+  </div>
+</div>
+{% empty %}<div class="text-center py-5" style="color:var(--mm-text-muted);"><i class="bi bi-sliders" style="font-size:2.5rem;display:block;margin-bottom:.5rem;"></i><p>No hay grupos de modificadores.</p></div>{% endfor %}
+{% endif %}
+
+{# ════════════════════════════════════════════════════════════ #}
+{# VISTA: PROMOCIONES                                           #}
+{# Lista de descuentos/ofertas. Cada promo muestra tipo,        #}
+{# vigencia, productos y un switch para activar/desactivar.     #}
+{# ════════════════════════════════════════════════════════════ #}
+{% if vista == 'promociones' %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <p style="font-size:.875rem;color:var(--mm-text-muted);margin:0;">Descuentos y ofertas especiales del menú.</p>
+  <button class="btn btn-primary btn-sm rounded-pill px-3" onclick="openNewPromo()"><i class="bi bi-plus-lg me-1"></i>Nueva promoción</button>
+</div>
+{# ── Tarjetas de promociones; opacidad reducida cuando inactiva ── #}
+{% for promo in promociones %}
+<div class="sc" style="opacity:{% if promo.activa %}1{% else %}.6{% endif %};">
+  <div class="d-flex align-items-start gap-3">
+    <div style="width:44px;height:44px;border-radius:var(--radius-sm);display:flex;align-items:center;justify-content:center;font-size:1.3rem;flex-shrink:0;background:{% if promo.activa %}var(--mm-green-pale){% else %}var(--mm-cream-dark){% endif %};">%</div>
+    <div class="flex-grow-1">
+      <div style="font-weight:700;font-size:.95rem;">{{ promo.titulo }}</div>
+      <div style="font-size:.78rem;color:var(--mm-text-muted);margin-top:.2rem;">
+        {% if promo.tipo_descuento %}
+          {{ promo.tipo_descuento.descripcion }}
+          {% if promo.tipo_descuento.descripcion == "Porcentaje" %}
+            ({{ promo.valor_descuento }}%)
+          {% elif promo.tipo_descuento.descripcion == "Monto fijo" %}
+            (${{ promo.valor_descuento }})
+          {% elif promo.tipo_descuento.descripcion == "Lleva X paga Y" %}
+            (Lleva {{ promo.cantidad_minima }} paga {{ promo.valor_descuento }})
+          {% elif promo.tipo_descuento.descripcion == "Combo precio fijo" %}
+            (Precio combo: ${{ promo.valor_descuento }})
+          {% elif promo.tipo_descuento.descripcion == "2x1" %}
+            (2x1)
+          {% endif %}
+        {% elif promo.tipo_promocion %}
+          {{ promo.tipo_promocion.descripcion }}
+        {% else %}
+          —
+        {% endif %}
+        · {{ promo.fecha_inicio|date:"d/m/Y" }} – {{ promo.fecha_fin|date:"d/m/Y" }}
+      </div>
+      <div class="d-flex gap-1 flex-wrap mt-1">{% for pp in promo.productos.all|slice:":4" %}<span style="background:var(--mm-cream-dark);border-radius:99px;padding:.15rem .5rem;font-size:.72rem;">{{ pp.nombre }}</span>{% endfor %}</div>
+    </div>
+    <div class="d-flex align-items-center gap-2 flex-shrink-0">
+      <div class="form-check form-switch mb-0"><input class="form-check-input" type="checkbox" {% if promo.activa %}checked{% endif %} onchange="togglePromo({{ promo.id }},this)" style="cursor:pointer;width:2.25em;height:1.1em;accent-color:var(--mm-green);"></div>
+      <button class="btn btn-link btn-sm p-0" onclick="editarPromo({{ promo.id }})" title="Editar promoción">
+        <i class="bi bi-pencil" style="color:var(--mm-text-muted);"></i>
+      </button>
+      <button class="btn btn-link btn-sm p-0" onclick="deletePromo({{ promo.id }})"><i class="bi bi-trash3" style="color:var(--mm-danger);"></i></button>
+    </div>
+  </div>
+</div>
+{% empty %}<div class="text-center py-5" style="color:var(--mm-text-muted);"><i class="bi bi-tag" style="font-size:2.5rem;display:block;margin-bottom:.5rem;"></i><p>No hay promociones.</p></div>{% endfor %}
+{% endif %}
+
+{# ════════════════════════════════════════════════════════════ #}
+{# VISTA: MESAS                                                 #}
+{# Tabla de mesas con QR pre-generado (base64). Permite crear,  #}
+{# editar y eliminar mesas, y gestionar sus ubicaciones.        #}
+{# ════════════════════════════════════════════════════════════ #}
+{% if vista == 'mesas' %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <p style="font-size:.875rem;color:var(--mm-text-muted);margin:0;">Configura las mesas. El código QR se genera automáticamente.</p>
+  <button class="btn btn-primary btn-sm rounded-pill px-3" onclick="document.getElementById('newMesaForm').style.display='block'"><i class="bi bi-plus-lg me-1"></i>Nueva mesa</button>
+</div>
+{# ── Formulario inline de nueva mesa (oculto por defecto) ── #}
+<div id="newMesaForm" style="display:none;" class="sc">
+  <h6 class="fw-bold mb-3">Nueva mesa</h6>
+  <form method="post" action="{% url 'gerente:mesas_crud' %}">{% csrf_token %}
+    <div class="row g-3 align-items-end">
+      <div class="col-md-3"><label class="form-label fw-semibold" style="font-size:.85rem;">Número *</label><input type="number" name="numero_mesa" required min="1" class="form-control" style="border-color:var(--mm-border);"></div>
+      <div class="col-md-2"><label class="form-label fw-semibold" style="font-size:.85rem;">Capacidad</label><input type="number" name="capacidad" value="4" min="1" class="form-control" style="border-color:var(--mm-border);"></div>
+      <div class="col-md-3"><label class="form-label fw-semibold" style="font-size:.85rem;">Ubicación</label>
+        <div class="d-flex gap-1">
+          <select name="ubicacion_id" id="ubicacionSelect" class="form-select" style="border-color:var(--mm-border);">
+            <option value="">Sin ubicación</option>
+            {% for ub in ubicaciones %}<option value="{{ ub.id }}">{{ ub.nombre }}</option>{% endfor %}
+          </select>
+          <button type="button" class="btn btn-sm px-2" style="background:var(--mm-cream-dark); white-space:nowrap;" onclick="abrirNuevaUbicacion()" title="Nueva ubicación">＋</button>
+        </div>
+      </div>
+      <div class="col-md-4 d-flex gap-2"><button type="submit" class="btn btn-primary flex-grow-1">Crear mesa</button><button type="button" class="btn" style="background:var(--mm-cream-dark);" onclick="document.getElementById('newMesaForm').style.display='none'">×</button></div>
+    </div>
+  </form>
+</div>
+{# ── Tabla de mesas: número, capacidad, ubicación, QR, estado y acciones ── #}
+<div class="table-responsive">
+  <table class="table data-table">
+    <thead><tr><th>#</th><th>CAPACIDAD</th><th>UBICACIÓN</th><th>CÓDIGO QR</th><th>ESTADO</th><th>ACCIONES</th></tr></thead>
+    <tbody>
+      {% for mesa in mesas %}
+      <tr>
+        <td style="font-weight:700;">Mesa {{ mesa.numero_mesa }}</td>
+        <td><i class="bi bi-people me-1" style="color:var(--mm-text-muted);"></i>{{ mesa.capacidad }}</td>
+        <td style="color:var(--mm-text-muted);">{{ mesa.ubicacion.nombre|default:"—" }}</td>
+        <td>
+          <img src="data:image/png;base64,{{ mesa.qr_img }}" width="50" height="50" style="border-radius:6px;" alt="QR Mesa {{ mesa.numero_mesa }}">
+        </td>
+        <td>{% if mesa.estado == 'libre' %}<span style="background:var(--mm-cream-dark);color:var(--mm-text-muted);border-radius:99px;padding:.2rem .7rem;font-size:.75rem;">Libre</span>{% else %}<span style="background:var(--mm-green-pale);color:var(--mm-green);border-radius:99px;padding:.2rem .7rem;font-size:.75rem;font-weight:600;">Ocupada</span>{% endif %}</td>
+        <td>
+          <button class="btn btn-link btn-sm p-1" onclick="showQR('{{ mesa.qr_img }}', {{ mesa.id }})" title="Ver QR"><i class="bi bi-qr-code" style="color:var(--mm-green);font-size:1.1rem;"></i></button>
+          <button class="btn btn-link btn-sm p-1" title="Editar mesa"
+                  onclick="editarMesa({{ mesa.id }}, {{ mesa.numero_mesa }}, {{ mesa.capacidad }}, '{{ mesa.ubicacion.id|default:'' }}')">
+            <i class="bi bi-pencil" style="color:var(--mm-text-muted);font-size:1.05rem;"></i>
+          </button>
+          {% if mesa.estado == 'libre' %}<form method="post" action="{% url 'gerente:mesa_eliminar' mesa.id %}" style="display:inline;" onsubmit="return confirm('¿Eliminar Mesa {{ mesa.numero_mesa }}?')">{% csrf_token %}<button type="submit" class="btn btn-link btn-sm p-1"><i class="bi bi-trash3" style="color:var(--mm-danger);"></i></button></form>{% endif %}
+        </td>
+      </tr>
+      {% empty %}<tr><td colspan="6" class="text-center py-5" style="color:var(--mm-text-muted);"><div style="font-size:2rem;">🪑</div>No hay mesas configuradas.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{# ── Gestión de Ubicaciones ─────────────────────────────────────────────────── #}
+<div class="mt-4 p-3" style="background:var(--mm-cream);border-radius:var(--radius-md);">
+  <div class="d-flex align-items-center justify-content-between mb-3">
+    <h6 class="fw-bold mb-0" style="font-size:.9rem;"><i class="bi bi-geo-alt-fill me-1" style="color:var(--mm-green);"></i>Zonas / Ubicaciones</h6>
+    <button class="btn btn-sm btn-primary" onclick="toggleNuevaUbicacion()">
+      <i class="bi bi-plus-lg me-1"></i>Nueva ubicación
+    </button>
+  </div>
+
+  {# Formulario inline para crear ubicación directamente #}
+  <div id="nuevaUbicacionForm" style="display:none; margin-bottom:.75rem;">
+    <div class="d-flex gap-2">
+      <input type="text" id="nuevaUbicacionNombre" class="form-control form-control-sm" placeholder="Nombre (ej. TERRAZA, BARRA…)"
+             style="border-color:var(--mm-border);" maxlength="60" data-upper
+             onkeydown="if(event.key==='Enter'){event.preventDefault();guardarNuevaUbicacion();}">
+      <button class="btn btn-sm btn-primary" onclick="guardarNuevaUbicacion()">
+        <i class="bi bi-check-lg"></i>
+      </button>
+      <button class="btn btn-sm" style="background:var(--mm-cream-dark);" onclick="toggleNuevaUbicacion()">
+        <i class="bi bi-x-lg"></i>
+      </button>
+    </div>
+  </div>
+
+  <div class="d-flex flex-wrap gap-2" id="ubicacionesList">
+    {% if ubicaciones %}
+    {% for ub in ubicaciones %}
+    <div class="d-flex align-items-center gap-1 px-3 py-1 rounded-pill" style="background:var(--mm-white);border:1px solid var(--mm-border);font-size:.85rem;" data-ub-id="{{ ub.id }}">
+      <span class="ub-nombre">{{ ub.nombre }}</span>
+      <button class="btn btn-link btn-sm p-0 ms-1" title="Editar" onclick="editarUbicacion({{ ub.id }}, '{{ ub.nombre }}')">
+        <i class="bi bi-pencil" style="font-size:.75rem;color:var(--mm-text-muted);"></i>
+      </button>
+      <button class="btn btn-link btn-sm p-0" title="Eliminar" onclick="eliminarUbicacion({{ ub.id }}, '{{ ub.nombre }}')">
+        <i class="bi bi-trash3" style="font-size:.75rem;color:var(--mm-danger);"></i>
+      </button>
+    </div>
+    {% endfor %}
+    {% else %}
+    <p class="mb-0" id="ubicacionesEmpty" style="font-size:.85rem;color:var(--mm-text-muted);">
+      <i class="bi bi-info-circle me-1"></i>Sin ubicaciones. Usa "Nueva ubicación" para agregar zonas.
+    </p>
+    {% endif %}
+  </div>
+</div>
+
+{% endif %}
+
+{# ════════════════════════════════════════════════════════════ #}
+{# MODALES — fuera de los bloques {% if vista %}, siempre       #}
+{# presentes en el DOM para poder abrirlos desde cualquier vista #}
+{# ════════════════════════════════════════════════════════════ #}
+
+{# ── Modal Producto: formulario para crear o editar un producto ── #}
+<!-- Modal Producto -->
+<div class="modal fade" id="productModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered modal-lg">
+    <div class="modal-content rounded-4 border-0">
+      <div class="modal-header border-0 pb-0 px-4 pt-4"><h5 class="modal-title fw-bold" id="productModalTitle">Nuevo producto</h5><button class="btn-close" data-bs-dismiss="modal"></button></div>
+      <div class="modal-body px-4 pb-0">
+        <form id="productForm" method="post">{% csrf_token %}
+          <div class="row g-3">
+            <div class="col-md-8"><label class="form-label fw-semibold" style="font-size:.85rem;">Nombre *</label><input type="text" name="nombre" id="pNombre" required maxlength="100" data-upper class="form-control" style="border-color:var(--mm-border);"></div>
+            <div class="col-md-4"><label class="form-label fw-semibold" style="font-size:.85rem;">Precio *</label><div class="input-group"><span class="input-group-text" style="background:var(--mm-cream);border-color:var(--mm-border);">$</span><input type="number" name="precio" id="pPrecio" required step="0.01" min="0" class="form-control" style="border-color:var(--mm-border);" placeholder="0.00"></div></div>
+            <div class="col-md-6"><label class="form-label fw-semibold" style="font-size:.85rem;">Categoría *</label><select name="categoria_id" id="pCategoria" required class="form-select" style="border-color:var(--mm-border);"><option value="">Selecciona…</option>{% for cat in categorias %}<option value="{{ cat.id }}">{{ cat.nombre }}</option>{% endfor %}</select></div>
+            <div class="col-md-6">
+              <label class="form-label fw-semibold d-flex align-items-center justify-content-between gap-2" style="font-size:.85rem;">
+                <span>Imagen</span>
+                <div class="d-flex gap-1">
+                  <button type="button" class="btn btn-sm" style="font-size:.72rem;background:var(--mm-cream-dark);padding:.15rem .55rem;" onclick="recortarDesdePicker('pImagen','producto')" title="Recortar la imagen actual">
+                    <i class="bi bi-crop me-1"></i>Recortar
+                  </button>
+                  <button type="button" class="btn btn-sm" style="font-size:.72rem;background:var(--mm-cream-dark);padding:.15rem .55rem;" onclick="openGaleria('pImagen','pImagenPreview','producto')">
+                    <i class="bi bi-images me-1"></i>Galería
+                  </button>
+                </div>
+              </label>
+              <div class="mm-image-picker" data-target="pImagen" data-preview="pImagenPreview" data-context="producto" data-aspect="4:3" data-aspect-label="4:3 · card de producto">
+                <input type="text" name="imagen_url" id="pImagen" maxlength="255" class="form-control mb-2" style="border-color:var(--mm-border);" placeholder="https://… o /media/images/…">
+                <div class="mm-dropzone" tabindex="0">
+                  <img id="pImagenPreview" class="mm-dz-preview" alt="" style="display:none;">
+                  <div class="mm-dz-text">
+                    <i class="bi bi-cloud-upload" style="font-size:1.5rem;"></i>
+                    <div style="font-size:.78rem;">Arrastra una imagen aquí o <span class="mm-dz-link">selecciona archivo</span></div>
+                    <div style="font-size:.7rem;color:var(--mm-text-muted);">PNG, JPG, WEBP · máx 5 MB</div>
+                  </div>
+                  <input type="file" class="mm-dz-input" accept="image/*" hidden>
+                </div>
+              </div>
+            </div>
+            <div class="col-12"><label class="form-label fw-semibold" style="font-size:.85rem;">Descripción</label><textarea name="descripcion" id="pDesc" maxlength="255" data-upper class="form-control" rows="2" style="border-color:var(--mm-border);resize:none;" placeholder="Breve descripción…"></textarea></div>
+            <div class="col-12 pb-1"><div class="form-check form-switch"><input class="form-check-input" type="checkbox" name="disponible" id="pDisponible" checked style="accent-color:var(--mm-green);"><label class="form-check-label fw-semibold" for="pDisponible" style="font-size:.875rem;">Disponible en el menú</label></div></div>
+          </div>
+        </form>
+      </div>
+      <div class="modal-footer border-0 px-4 pb-4 pt-2"><button type="button" class="btn" style="background:var(--mm-cream-dark);" data-bs-dismiss="modal">Cancelar</button><button type="submit" form="productForm" class="btn btn-primary px-4">Guardar</button></div>
+    </div>
+  </div>
+</div>
+
+{# ── Modal Modificador: crear/editar grupo de opciones con plantillas ── #}
+<!-- Modal Modificador -->
+<div class="modal fade" id="modModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered modal-lg">
+    <div class="modal-content rounded-4 border-0">
+      <div class="modal-header border-0 pb-0 px-4 pt-4"><h5 class="modal-title fw-bold">Nuevo grupo de modificadores</h5><button class="btn-close" data-bs-dismiss="modal"></button></div>
+      <div class="modal-body px-4">
+        {% if plantillas %}
+        <div class="mb-3 p-3 rounded-3" style="background:var(--mm-cream);border:1px dashed var(--mm-border);">
+          <label class="form-label fw-semibold mb-1" style="font-size:.85rem;"><i class="bi bi-bookmark-fill me-1" style="color:var(--mm-gold);"></i>Copiar desde plantilla</label>
+          <div class="d-flex gap-2">
+            <select id="mPlantilla" class="form-select form-select-sm" style="border-color:var(--mm-border);">
+              <option value="">Selecciona una plantilla…</option>
+              {% for pt in plantillas %}<option value="{{ pt.id }}" data-nombre="{{ pt.nombre_grupo }}" data-tipo="{{ pt.tipo }}" data-obligatorio="{{ pt.es_obligatorio|yesno:'true,false' }}" data-max="{{ pt.max_selecciones|default:'' }}" data-opciones="{{ pt.opciones.all|length }}">{{ pt.nombre_grupo }}</option>{% endfor %}
+            </select>
+            <button type="button" class="btn btn-sm px-3" style="background:var(--mm-cream-dark);white-space:nowrap;" onclick="aplicarPlantilla()">Aplicar</button>
+          </div>
+        </div>
+        {% endif %}
+        <div class="row g-3 mb-3">
+          <div class="col-md-6"><label class="form-label fw-semibold" style="font-size:.85rem;">Nombre del grupo *</label><input type="text" id="mNombre" maxlength="100" data-upper class="form-control" placeholder="ej. Tipo de leche" style="border-color:var(--mm-border);"></div>
+          <div class="col-md-6"><label class="form-label fw-semibold" style="font-size:.85rem;">Productos * <span style="font-size:.7rem;font-weight:400;color:var(--mm-text-muted);">(Ctrl/⌘ para varios)</span></label><select id="mProducto" multiple class="form-select" style="border-color:var(--mm-border);min-height:90px;"><option value="" disabled>Selecciona productos…</option>{% for prod in productos_list %}<option value="{{ prod.id }}">{{ prod.nombre }}</option>{% endfor %}</select></div>
+          <div class="col-md-4"><label class="form-label fw-semibold" style="font-size:.85rem;">Tipo</label><select id="mTipo" class="form-select" style="border-color:var(--mm-border);"><option value="única">Selección única</option><option value="múltiple">Múltiple</option></select></div>
+          <div class="col-md-4"><label class="form-label fw-semibold" style="font-size:.85rem;">Máx. selecciones</label><input type="number" id="mMax" class="form-control" min="1" placeholder="Ilimitado" style="border-color:var(--mm-border);"></div>
+          <div class="col-md-4 d-flex align-items-end pb-1"><div class="form-check form-switch"><input class="form-check-input" type="checkbox" id="mObligatorio" style="accent-color:var(--mm-green);"><label class="form-check-label fw-semibold" for="mObligatorio" style="font-size:.875rem;">Obligatorio</label></div></div>
+        </div>
+        <h6 class="fw-bold mb-2">Opciones</h6>
+        <div id="opcionesContainer" class="mb-2"></div>
+        <button type="button" class="btn btn-sm" style="background:var(--mm-cream-dark);" onclick="addOpcion()"><i class="bi bi-plus-lg me-1"></i>Agregar opción</button>
+      </div>
+      <div class="modal-footer border-0 px-4 pb-4 pt-0"><button type="button" class="btn" style="background:var(--mm-cream-dark);" data-bs-dismiss="modal">Cancelar</button><button type="button" class="btn btn-primary px-4" onclick="saveModificador()">Guardar grupo</button></div>
+    </div>
+  </div>
+</div>
+
+{# ── Modal Promoción: crear/editar oferta con tipo, fechas, días y productos ── #}
+{% comment %}2.1: rediseñado en secciones (Datos básicos · Tipo de descuento · Vigencia ·
+   Productos · Carrusel · Banner) con validación HTML5 + JS por campo. Los
+   límites coinciden 1:1 con el modelo Promocion (max_length, decimal places,
+   PositiveInteger, etc.).{% endcomment %}
+<!-- Modal Nueva Promoción -->
+<style>
+  .promo-section{background:var(--mm-cream);border-radius:var(--radius-md);padding:1rem 1rem .85rem;margin-bottom:1rem;}
+  .promo-section-title{font-size:.72rem;font-weight:800;text-transform:uppercase;letter-spacing:.08em;color:var(--mm-green);margin-bottom:.85rem;display:flex;align-items:center;gap:.4rem;}
+  .promo-section-title i{font-size:.95rem;}
+  .promo-help{font-size:.72rem;color:var(--mm-text-muted);margin-top:.25rem;}
+  .promo-field-error{font-size:.72rem;color:var(--mm-danger);margin-top:.2rem;display:none;}
+  #promoForm .form-control.is-invalid, #promoForm .form-select.is-invalid{border-color:var(--mm-danger);box-shadow:0 0 0 .15rem rgba(192,57,43,.15);}
+</style>
+<div class="modal fade" id="promoModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable">
+    <div class="modal-content rounded-4 border-0">
+      <div class="modal-header border-0 pb-0 px-4 pt-4"><h5 class="modal-title fw-bold">Nueva promoción</h5><button class="btn-close" data-bs-dismiss="modal"></button></div>
+      <div class="modal-body px-4">
+        <form id="promoForm" method="post" novalidate>{% csrf_token %}
+          <input type="hidden" name="promo_id" id="promoId">
+
+          {# ── Sección 1: Datos básicos ──────────────────────────────────── #}
+          <section class="promo-section">
+            <div class="promo-section-title"><i class="bi bi-info-circle-fill"></i>Datos básicos</div>
+            <div class="row g-3">
+              <div class="col-md-8">
+                <label class="form-label fw-semibold" style="font-size:.85rem;">Título <span class="text-danger">*</span></label>
+                <input type="text" name="titulo" id="promoTitulo" required minlength="3" maxlength="100" data-upper
+                       class="form-control" placeholder="ej. 2×1 en Frappés">
+                <div class="promo-help">Máx. 100 caracteres. Se guarda en mayúsculas.</div>
+                <div class="promo-field-error" data-error-for="titulo"></div>
+              </div>
+              <div class="col-md-4">
+                <label class="form-label fw-semibold" style="font-size:.85rem;">Orden en carrusel</label>
+                <input type="number" name="orden" id="promoOrden" value="0" min="0" max="32767" step="1" class="form-control">
+                <div class="promo-help">Menor número = aparece primero.</div>
+                <div class="promo-field-error" data-error-for="orden"></div>
+              </div>
+              <div class="col-12">
+                <label class="form-label fw-semibold" style="font-size:.85rem;">Descripción corta <span class="text-muted fw-normal">(opcional)</span></label>
+                <input type="text" name="descripcion_corta" id="promoDescripcionCorta" maxlength="120" data-upper
+                       class="form-control" placeholder='ej. "15% off en bebidas frías"'>
+                <div class="promo-help">Máx. 120 caracteres. Texto bajo el título en el carrusel.</div>
+                <div class="promo-field-error" data-error-for="descripcion_corta"></div>
+              </div>
+            </div>
+          </section>
+
+          {# ── Sección 2: Tipo de descuento ──────────────────────────────── #}
+          <section class="promo-section">
+            <div class="promo-section-title"><i class="bi bi-percent"></i>Tipo de descuento</div>
+            <div class="row g-3">
+              <div class="col-md-6">
+                <label class="form-label fw-semibold" style="font-size:.85rem;">Tipo <span class="text-danger">*</span></label>
+                <select name="tipo_descuento_id" id="promoTipoDescuento" required class="form-select" onchange="onPromoTipoChange(this)">
+                  <option value="">— Selecciona un tipo —</option>
+                  {% for td in tipos_descuento %}<option value="{{ td.id }}" data-desc="{{ td.descripcion }}">{{ td.descripcion }}</option>{% endfor %}
+                </select>
+                <div id="promoTipoHint" class="promo-help" style="padding:.4rem .55rem;background:var(--mm-white);border-radius:6px;display:none;margin-top:.4rem;"></div>
+                <div class="promo-field-error" data-error-for="tipo_descuento_id"></div>
+              </div>
+              <div class="col-md-3">
+                <label class="form-label fw-semibold" style="font-size:.85rem;">Aplicación</label>
+                <select name="aplicacion" id="promoAplicacion" class="form-select">
+                  <option value="item">Por ítem</option>
+                  <option value="total">Total carrito</option>
+                  <option value="combo">Combo</option>
+                </select>
+                <div class="promo-help">Sobre qué se aplica el descuento.</div>
+              </div>
+              <div class="col-md-3" id="fieldValorDescuento">
+                <label class="form-label fw-semibold" style="font-size:.85rem;" id="labelValorDescuento">Valor <span class="text-danger">*</span></label>
+                <input type="number" name="valor_descuento" id="promoValor" step="0.01" min="0" max="99999999.99"
+                       class="form-control" placeholder="ej. 15">
+                <div class="promo-help" id="promoValorHelp">Hasta 2 decimales.</div>
+                <div class="promo-field-error" data-error-for="valor_descuento"></div>
+              </div>
+              <div class="col-md-3" id="fieldCantidadMinima" style="display:none;">
+                <label class="form-label fw-semibold" style="font-size:.85rem;">Llevas (X) <span class="text-danger">*</span></label>
+                <input type="number" name="cantidad_minima" id="promoCantidadMinima" min="2" max="2147483647" step="1" class="form-control" placeholder="ej. 3">
+                <div class="promo-help">Mínimo 2 unidades.</div>
+                <div class="promo-field-error" data-error-for="cantidad_minima"></div>
+              </div>
+              <div class="col-12" id="promo2x1Info" style="display:none;">
+                <div class="p-3 rounded-3" style="background:var(--mm-white); font-size:.82rem;">
+                  <strong>2×1:</strong> por cada 2 unidades del producto seleccionado, la segunda es gratis. No requiere valor numérico.
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {# ── Sección 3: Vigencia ───────────────────────────────────────── #}
+          <section class="promo-section">
+            <div class="promo-section-title"><i class="bi bi-calendar-event-fill"></i>Vigencia</div>
+            <div class="row g-3">
+              <div class="col-md-6">
+                <label class="form-label fw-semibold" style="font-size:.85rem;">Fecha inicio <span class="text-danger">*</span></label>
+                <input type="datetime-local" name="fecha_inicio" id="promoFechaInicio" required class="form-control">
+                <div class="promo-field-error" data-error-for="fecha_inicio"></div>
+              </div>
+              <div class="col-md-6">
+                <label class="form-label fw-semibold" style="font-size:.85rem;">Fecha fin <span class="text-danger">*</span></label>
+                <input type="datetime-local" name="fecha_fin" id="promoFechaFin" required class="form-control">
+                <div class="promo-field-error" data-error-for="fecha_fin"></div>
+              </div>
+              <div class="col-12">
+                <label class="form-label fw-semibold" style="font-size:.85rem;">Días de la semana</label>
+                <div id="promoDiasSemana" style="display:flex;gap:.4rem;flex-wrap:wrap;">
+                  <label class="dia-chk" style="flex:1;min-width:60px;border:1.5px solid var(--mm-border);border-radius:var(--radius-sm);padding:.4rem .5rem;text-align:center;cursor:pointer;font-size:.78rem;font-weight:600;user-select:none;background:var(--mm-white);">
+                    <input type="checkbox" name="dias_semana" value="0" style="display:none;"> Lun
+                  </label>
+                  <label class="dia-chk" style="flex:1;min-width:60px;border:1.5px solid var(--mm-border);border-radius:var(--radius-sm);padding:.4rem .5rem;text-align:center;cursor:pointer;font-size:.78rem;font-weight:600;user-select:none;background:var(--mm-white);">
+                    <input type="checkbox" name="dias_semana" value="1" style="display:none;"> Mar
+                  </label>
+                  <label class="dia-chk" style="flex:1;min-width:60px;border:1.5px solid var(--mm-border);border-radius:var(--radius-sm);padding:.4rem .5rem;text-align:center;cursor:pointer;font-size:.78rem;font-weight:600;user-select:none;background:var(--mm-white);">
+                    <input type="checkbox" name="dias_semana" value="2" style="display:none;"> Mié
+                  </label>
+                  <label class="dia-chk" style="flex:1;min-width:60px;border:1.5px solid var(--mm-border);border-radius:var(--radius-sm);padding:.4rem .5rem;text-align:center;cursor:pointer;font-size:.78rem;font-weight:600;user-select:none;background:var(--mm-white);">
+                    <input type="checkbox" name="dias_semana" value="3" style="display:none;"> Jue
+                  </label>
+                  <label class="dia-chk" style="flex:1;min-width:60px;border:1.5px solid var(--mm-border);border-radius:var(--radius-sm);padding:.4rem .5rem;text-align:center;cursor:pointer;font-size:.78rem;font-weight:600;user-select:none;background:var(--mm-white);">
+                    <input type="checkbox" name="dias_semana" value="4" style="display:none;"> Vie
+                  </label>
+                  <label class="dia-chk" style="flex:1;min-width:60px;border:1.5px solid var(--mm-border);border-radius:var(--radius-sm);padding:.4rem .5rem;text-align:center;cursor:pointer;font-size:.78rem;font-weight:600;user-select:none;background:var(--mm-white);">
+                    <input type="checkbox" name="dias_semana" value="5" style="display:none;"> Sáb
+                  </label>
+                  <label class="dia-chk" style="flex:1;min-width:60px;border:1.5px solid var(--mm-border);border-radius:var(--radius-sm);padding:.4rem .5rem;text-align:center;cursor:pointer;font-size:.78rem;font-weight:600;user-select:none;background:var(--mm-white);">
+                    <input type="checkbox" name="dias_semana" value="6" style="display:none;"> Dom
+                  </label>
+                </div>
+                <div class="promo-help">Sin selección = aplica todos los días.</div>
+              </div>
+            </div>
+          </section>
+
+          {# ── Sección 4: Productos ─────────────────────────────────────── #}
+          <section class="promo-section">
+            <div class="promo-section-title"><i class="bi bi-box-seam-fill"></i>Productos</div>
+            <div class="row g-3">
+              <div class="col-12" id="fieldProductosAplicables">
+                <label class="form-label fw-semibold" style="font-size:.85rem;" id="labelProductosAplicables">Productos aplicables</label>
+                <select name="productos_aplicables" id="promoProductosAplicables" multiple class="form-select" style="min-height:120px;">
+                  {% for prod in productos_list %}<option value="{{ prod.id }}">{{ prod.nombre }}</option>{% endfor %}
+                </select>
+                <div class="promo-help">Ctrl/⌘ para selección múltiple. Vacío = aplica a todos.</div>
+                <div class="form-check mt-2">
+                  <input class="form-check-input" type="checkbox" name="requiere_todos_productos" id="promoRequiereTodos" value="1" style="accent-color:var(--mm-green);">
+                  <label class="form-check-label" for="promoRequiereTodos" style="font-size:.78rem;">
+                    Requiere TODOS los productos aplicables en el carrito <span class="text-muted">(modo combo)</span>
+                  </label>
+                </div>
+                <div class="promo-field-error" data-error-for="productos_aplicables"></div>
+              </div>
+              <div class="col-12" id="fieldProductosBeneficiados" style="display:none;">
+                <label class="form-label fw-semibold" style="font-size:.85rem;">Productos beneficiados (combo)</label>
+                <select name="productos_beneficiados" id="promoProductosBeneficiados" multiple class="form-select" style="min-height:120px;">
+                  {% for prod in productos_list %}<option value="{{ prod.id }}">{{ prod.nombre }}</option>{% endfor %}
+                </select>
+                <div class="promo-help">Productos que reciben el precio de combo.</div>
+              </div>
+            </div>
+          </section>
+
+          {# ── Sección 5: Banner ─────────────────────────────────────────── #}
+          <section class="promo-section">
+            <div class="promo-section-title"><i class="bi bi-image-fill"></i>Imagen del banner <span class="text-muted fw-normal" style="font-weight:500;text-transform:none;letter-spacing:0;">(opcional)</span></div>
+            <div class="d-flex justify-content-end gap-1 mb-2">
+              <button type="button" class="btn btn-sm" style="font-size:.72rem;background:var(--mm-white);padding:.15rem .55rem;" onclick="recortarDesdePicker('promoImagenUrl','promo')" title="Recortar la imagen actual">
+                <i class="bi bi-crop me-1"></i>Recortar
+              </button>
+              <button type="button" class="btn btn-sm" style="font-size:.72rem;background:var(--mm-white);padding:.15rem .55rem;" onclick="openGaleria('promoImagenUrl','promoImagenPreview','promo')">
+                <i class="bi bi-images me-1"></i>Galería
+              </button>
+            </div>
+            <div class="mm-image-picker" data-target="promoImagenUrl" data-preview="promoImagenPreview" data-context="promo" data-aspect="3:1" data-aspect-label="3:1 · banner de carrusel">
+              <input type="url" name="imagen_url" id="promoImagenUrl" maxlength="500" class="form-control mb-2" placeholder="https://… o /media/images/…">
+              <div class="mm-dropzone" tabindex="0">
+                <img id="promoImagenPreview" class="mm-dz-preview" alt="" style="display:none;">
+                <div class="mm-dz-text">
+                  <i class="bi bi-cloud-upload" style="font-size:1.5rem;"></i>
+                  <div style="font-size:.78rem;">Arrastra una imagen aquí o <span class="mm-dz-link">selecciona archivo</span></div>
+                  <div style="font-size:.7rem;color:var(--mm-text-muted);">PNG, JPG, WEBP · máx 5 MB</div>
+                </div>
+                <input type="file" class="mm-dz-input" accept="image/*" hidden>
+              </div>
+            </div>
+            <div class="promo-help">Si se deja vacío, se usará la imagen del primer producto aplicable. Máx. 500 caracteres.</div>
+            <div class="promo-field-error" data-error-for="imagen_url"></div>
+          </section>
+        </form>
+      </div>
+      <div class="modal-footer border-0 px-4 pb-4 pt-0"><button type="button" class="btn" style="background:var(--mm-cream-dark);" data-bs-dismiss="modal">Cancelar</button><button type="submit" form="promoForm" class="btn btn-primary px-4" id="promoSubmitBtn">Crear promoción</button></div>
+    </div>
+  </div>
+</div>
+
+{# ── Modal Recorte: Cropper.js con toolbar, preview en vivo y soporte multi-ratio ── #}
+<!-- Modal Recortar / ajustar imagen -->
+<div class="modal fade" id="cropModal" tabindex="-1" data-bs-backdrop="static">
+  <div class="modal-dialog modal-dialog-centered modal-xl">
+    <div class="modal-content rounded-4 border-0">
+      <div class="modal-header border-0 px-4 pt-4 pb-2">
+        <div>
+          <h5 class="modal-title fw-bold"><i class="bi bi-crop me-2"></i>Ajustar imagen</h5>
+          <div id="cropAspectInfo" style="font-size:.75rem;color:var(--mm-text-muted);">Proporción fija para preservar consistencia visual.</div>
+        </div>
+        <button class="btn-close" data-bs-dismiss="modal" id="cropCancelBtn"></button>
+      </div>
+      <div class="modal-body px-4 pt-2">
+        <div class="row g-3">
+          <!-- Área de recorte -->
+          <div class="col-lg-8">
+            <div style="background:#1a1a1a;border-radius:var(--radius-md);padding:.5rem;max-height:60vh;overflow:hidden;">
+              <img id="cropSource" alt="" style="max-width:100%;display:block;">
+            </div>
+            <!-- Toolbar -->
+            <div class="d-flex gap-2 mt-2 flex-wrap">
+              <button type="button" class="btn btn-sm" style="background:var(--mm-cream-dark);font-size:.78rem;" onclick="cropApi('rotate',-90)" title="Rotar 90° antihorario"><i class="bi bi-arrow-counterclockwise"></i></button>
+              <button type="button" class="btn btn-sm" style="background:var(--mm-cream-dark);font-size:.78rem;" onclick="cropApi('rotate',90)" title="Rotar 90° horario"><i class="bi bi-arrow-clockwise"></i></button>
+              <button type="button" class="btn btn-sm" style="background:var(--mm-cream-dark);font-size:.78rem;" onclick="cropApi('flipH')" title="Voltear horizontal"><i class="bi bi-symmetry-vertical"></i></button>
+              <button type="button" class="btn btn-sm" style="background:var(--mm-cream-dark);font-size:.78rem;" onclick="cropApi('flipV')" title="Voltear vertical"><i class="bi bi-symmetry-horizontal"></i></button>
+              <button type="button" class="btn btn-sm" style="background:var(--mm-cream-dark);font-size:.78rem;" onclick="cropApi('zoomIn')" title="Acercar"><i class="bi bi-zoom-in"></i></button>
+              <button type="button" class="btn btn-sm" style="background:var(--mm-cream-dark);font-size:.78rem;" onclick="cropApi('zoomOut')" title="Alejar"><i class="bi bi-zoom-out"></i></button>
+              <button type="button" class="btn btn-sm" style="background:var(--mm-cream-dark);font-size:.78rem;" onclick="cropApi('reset')" title="Reiniciar"><i class="bi bi-arrow-clockwise"></i> Reset</button>
+              <button type="button" class="btn btn-sm" style="background:var(--mm-cream-dark);font-size:.78rem;" id="cropAspectToggle" onclick="cropToggleAspect()" title="Cambiar proporción"><i class="bi bi-aspect-ratio"></i> <span id="cropAspectLbl">4:3</span></button>
+            </div>
+          </div>
+          <!-- Preview realista del contexto -->
+          <div class="col-lg-4">
+            <div style="font-size:.72rem;font-weight:800;text-transform:uppercase;letter-spacing:.08em;color:var(--mm-text-muted);margin-bottom:.4rem;">
+              <i class="bi bi-eye me-1"></i>Así se verá <span id="cropCtxName">en el menú</span>
+            </div>
+
+            <!-- Contexto: card de producto en el menú del cliente -->
+            <div id="cropCtx-producto" class="crop-context-pane">
+              <div class="mock-product-card">
+                <div class="cropper-preview-mm mock-product-img"></div>
+                <div class="mock-product-body">
+                  <div class="mock-product-name">Nombre del producto</div>
+                  <div class="mock-product-desc">Descripción breve del producto…</div>
+                  <div class="d-flex justify-content-between align-items-center mt-1">
+                    <span class="mock-product-price">$65</span>
+                    <button type="button" class="mock-add-btn">+</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Contexto: banner del carrusel de promociones -->
+            <div id="cropCtx-promo" class="crop-context-pane" style="display:none;">
+              <div class="mock-promo-carousel">
+                <div class="cropper-preview-mm mock-promo-img"></div>
+                <div class="mock-promo-content">
+                  <div class="mock-promo-tag"><i class="bi bi-tag-fill me-1"></i>PROMO</div>
+                  <div class="mock-promo-title">Título de la promoción</div>
+                  <div class="mock-promo-desc">Descripción corta del beneficio</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Contexto: galería (sin chrome, ratio libre) -->
+            <div id="cropCtx-galeria" class="crop-context-pane" style="display:none;">
+              <div class="cropper-preview-mm mock-galeria-img"></div>
+            </div>
+
+            <div id="cropSizeInfo" style="font-size:.7rem;color:var(--mm-text-muted);margin-top:.6rem;"></div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer border-0 px-4 pb-4 pt-2">
+        <button type="button" class="btn" style="background:var(--mm-cream-dark);" data-bs-dismiss="modal">Cancelar</button>
+        <button type="button" class="btn btn-primary px-4" id="cropConfirmBtn" onclick="cropConfirmar()">
+          <i class="bi bi-check2 me-1"></i>Recortar y subir
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{# ── Modal Galería: explorador de imágenes del servidor con filtros y paginación ── #}
+<!-- Modal Galería de imágenes -->
+<div class="modal fade" id="galeriaModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered modal-xl modal-dialog-scrollable">
+    <div class="modal-content rounded-4 border-0">
+      <div class="modal-header border-0 px-4 pt-4 pb-2">
+        <h5 class="modal-title fw-bold"><i class="bi bi-images me-2"></i>Galería de imágenes</h5>
+        <button class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body px-4 pt-0">
+        <!-- Filtros -->
+        <div class="row g-2 mb-3 align-items-end">
+          <div class="col-md-5">
+            <label class="form-label fw-semibold mb-1" style="font-size:.78rem;">Buscar por nombre</label>
+            <input type="text" id="galQ" class="form-control form-control-sm" placeholder="ej. mochi, banner…" oninput="cargarGaleria()">
+          </div>
+          <div class="col-md-3">
+            <label class="form-label fw-semibold mb-1" style="font-size:.78rem;">Desde</label>
+            <input type="date" id="galDesde" class="form-control form-control-sm" onchange="cargarGaleria()">
+          </div>
+          <div class="col-md-3">
+            <label class="form-label fw-semibold mb-1" style="font-size:.78rem;">Hasta</label>
+            <input type="date" id="galHasta" class="form-control form-control-sm" onchange="cargarGaleria()">
+          </div>
+          <div class="col-md-1 d-flex justify-content-end">
+            <button class="btn btn-sm" style="background:var(--mm-cream-dark);font-size:.78rem;" onclick="galLimpiar()" title="Limpiar filtros">
+              <i class="bi bi-x-circle"></i>
+            </button>
+          </div>
+        </div>
+
+        <!-- Botón subir nueva -->
+        <div class="mb-3 d-flex align-items-center justify-content-between">
+          <div id="galCount" style="font-size:.78rem;color:var(--mm-text-muted);">—</div>
+          <button class="btn btn-sm" style="background:var(--mm-green);color:#fff;font-size:.78rem;" onclick="document.getElementById('galUploadInput').click()">
+            <i class="bi bi-upload me-1"></i>Subir nueva
+          </button>
+          <input type="file" id="galUploadInput" accept="image/*" hidden onchange="galSubir(this)">
+        </div>
+
+        <!-- Grid -->
+        <div id="galGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:.75rem;min-height:200px;">
+          <div class="text-center py-4 w-100" style="grid-column:1/-1;color:var(--mm-text-muted);">Cargando…</div>
+        </div>
+      </div>
+      <div class="modal-footer border-0 px-4 pb-4 pt-2">
+        <button type="button" class="btn" style="background:var(--mm-cream-dark);" data-bs-dismiss="modal">Cerrar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{# ── Modal QR: muestra y permite descargar el QR de una mesa (imagen base64) ── #}
+<!-- Modal QR (versión con imagen base64, sin librería externa) -->
+<div class="modal fade" id="qrModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered" style="max-width:300px;">
+    <div class="modal-content rounded-4 border-0 text-center">
+      <div class="modal-body p-4">
+        <h6 class="fw-bold mb-3" id="qrTitle">QR Mesa</h6>
+        <img id="qrModalImg" src="" alt="Código QR" style="border-radius:var(--radius-sm); border:2px solid var(--mm-border); width:220px; height:220px;">
+        <p style="font-size:.72rem; color:var(--mm-text-muted); margin-top:.75rem;" id="qrUrl"></p>
+        <button class="btn btn-primary w-100 mt-2" onclick="downloadQR()"><i class="bi bi-download me-1"></i>Descargar QR</button>
+        <button class="btn w-100 mt-2" style="background:var(--mm-cream-dark);" data-bs-dismiss="modal">Cerrar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{# ── Modal Editar Mesa: cambiar número, capacidad y ubicación ── #}
+<!-- Modal Editar Mesa -->
+<div class="modal fade" id="editMesaModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered" style="max-width:420px;">
+    <div class="modal-content rounded-4 border-0">
+      <div class="modal-header border-0 pb-0 px-4 pt-4">
+        <h5 class="modal-title fw-bold">Editar mesa</h5>
+        <button class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <form id="editMesaForm" method="post">{% csrf_token %}
+        <div class="modal-body px-4">
+          <div class="mb-3">
+            <label class="form-label fw-semibold" style="font-size:.85rem;">Número de mesa *</label>
+            <input type="number" name="numero_mesa" id="editMesaNumero" required min="1" class="form-control" style="border-color:var(--mm-border);">
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-semibold" style="font-size:.85rem;">Capacidad *</label>
+            <input type="number" name="capacidad" id="editMesaCapacidad" required min="1" class="form-control" style="border-color:var(--mm-border);">
+          </div>
+          <div class="mb-2">
+            <label class="form-label fw-semibold" style="font-size:.85rem;">Ubicación</label>
+            <select name="ubicacion_id" id="editMesaUbicacion" class="form-select" style="border-color:var(--mm-border);">
+              <option value="">— Sin ubicación —</option>
+              {% for ub in ubicaciones %}<option value="{{ ub.id }}">{{ ub.nombre }}</option>{% endfor %}
+            </select>
+          </div>
+        </div>
+        <div class="modal-footer border-0 px-4 pb-4 pt-2">
+          <button type="button" class="btn" style="background:var(--mm-cream-dark);" data-bs-dismiss="modal">Cancelar</button>
+          <button type="submit" class="btn btn-primary px-4">Guardar cambios</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+{# ── Modal Editar Categoría: nombre, área KDS y orden de aparición ── #}
+<!-- Modal Editar Categoría -->
+<div class="modal fade" id="editCatModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered" style="max-width:420px;">
+    <div class="modal-content rounded-4 border-0">
+      <div class="modal-header border-0 pb-0 px-4 pt-4">
+        <h5 class="modal-title fw-bold">Editar categoría</h5>
+        <button class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body px-4">
+        <input type="hidden" id="editCatId">
+        <div class="mb-3">
+          <label class="form-label fw-semibold" style="font-size:.85rem;">Nombre *</label>
+          <input type="text" id="editCatNombre" maxlength="100" data-upper class="form-control" style="border-color:var(--mm-border);">
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold" style="font-size:.85rem;">Área KDS</label>
+          <select id="editCatArea" class="form-select" style="border-color:var(--mm-border);">
+            <option value="ambos">Ambos</option>
+            <option value="cocina">Solo Cocina</option>
+            <option value="bar">Solo Bar</option>
+          </select>
+        </div>
+        <div class="mb-2">
+          <label class="form-label fw-semibold" style="font-size:.85rem;">Orden</label>
+          <input type="number" id="editCatOrden" class="form-control" style="border-color:var(--mm-border);">
+        </div>
+      </div>
+      <div class="modal-footer border-0 px-4 pb-4 pt-2">
+        <button type="button" class="btn" style="background:var(--mm-cream-dark);" data-bs-dismiss="modal">Cancelar</button>
+        <button type="button" class="btn btn-primary px-4" onclick="guardarCategoria()">Guardar cambios</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{# ════════════════════════════════════════════════════════════ #}
+{# BLOQUE DE SCRIPTS: toda la lógica JS del gestor de menú      #}
+{# ════════════════════════════════════════════════════════════ #}
+{% block extra_scripts %}
+<script>
+// Token CSRF obtenido del helper global de staff_base
+const CSRF=getCsrf();
+
+// ─── Drag-and-drop / upload de imágenes ─────────────────────────────────────
+// Cualquier .mm-image-picker recibe arrastrar-y-soltar O clic para abrir el
+// selector nativo. Sube el archivo a /gerente/upload-imagen/ y pone la ruta
+// devuelta en el input data-target del picker.
+const UPLOAD_URL = '{% url "gerente:upload_imagen" %}';
+
+// Actualiza el elemento <img> de previsualización según la URL recibida.
+// Si la URL está vacía, oculta la imagen y vuelve a mostrar el texto de ayuda.
+function _mmShowPreview(picker, url) {
+  const previewId = picker.dataset.preview;
+  if (!previewId) return;
+  const img = document.getElementById(previewId);
+  if (!img) return;
+  if (url) {
+    img.src = url;
+    img.style.display = '';
+    const text = picker.querySelector('.mm-dz-text');
+    if (text) text.style.display = 'none';
+  } else {
+    img.removeAttribute('src');
+    img.style.display = 'none';
+    const text = picker.querySelector('.mm-dz-text');
+    if (text) text.style.display = '';
+  }
+}
+
+// Sube un Blob o File al endpoint de upload y actualiza el input y preview del picker.
+async function _mmUploadBlob(picker, blob, originalName) {
+  const dropzone = picker.querySelector('.mm-dropzone');
+  const input    = document.getElementById(picker.dataset.target);
+  dropzone?.classList.add('is-busy');
+  try {
+    const fd = new FormData();
+    fd.append('imagen', blob, originalName || 'imagen.jpg');
+    const res = await fetch(UPLOAD_URL, {
+      method: 'POST',
+      headers: { 'X-CSRFToken': CSRF },
+      body: fd,
+    });
+    const data = await res.json().catch(() => ({ ok: false, error: 'Respuesta inválida' }));
+    if (!res.ok || !data.ok) {
+      showToast?.(data.error || `Error ${res.status}`, 'error');
+      return null;
+    }
+    if (input) {
+      input.value = data.url;
+      _mmShowPreview(picker, data.url);
+    }
+    showToast?.('Imagen subida', 'success');
+    return data.url;
+  } catch (e) {
+    showToast?.('Error de red al subir imagen', 'error');
+    return null;
+  } finally {
+    dropzone?.classList.remove('is-busy');
+  }
+}
+
+// Valida tipo y tamaño del archivo; si pasa, abre el modal de recorte antes de subir.
+function _mmUpload(picker, file) {
+  if (!file || !file.type.startsWith('image/')) {
+    showToast?.('Archivo no es imagen', 'error');
+    return;
+  }
+  if (file.size > 5 * 1024 * 1024) {
+    showToast?.('Imagen mayor a 5 MB', 'error');
+    return;
+  }
+  abrirRecorte(file, {
+    aspect: picker.dataset.aspect || '4:3',
+    aspectLabel: picker.dataset.aspectLabel || picker.dataset.aspect || '4:3',
+    context: picker.dataset.context || 'galeria',
+    onConfirm: async (blob, name) => _mmUploadBlob(picker, blob, name),
+  });
+}
+
+// Descarga la imagen por URL, la convierte a File y abre el modal de recorte.
+// Útil para re-recortar imágenes ya subidas al servidor.
+async function abrirRecorteDesdeUrl(url, options) {
+  if (!url) return;
+  try {
+    const res = await fetch(url, { cache: 'no-cache' });
+    if (!res.ok) throw new Error('No se pudo cargar');
+    const blob = await res.blob();
+    const nombre = (url.split('/').pop() || 'imagen.jpg').split('?')[0];
+    const file = new File([blob], nombre, { type: blob.type || 'image/jpeg' });
+    abrirRecorte(file, options);
+  } catch (e) {
+    showToast?.('No se pudo cargar la imagen para recortar', 'error');
+  }
+}
+
+// Lee la URL del input del picker y lanza el flujo de recorte sobre esa imagen.
+function recortarDesdePicker(targetInputId, context) {
+  const input = document.getElementById(targetInputId);
+  const picker = input?.closest('.mm-image-picker');
+  if (!input || !picker) return;
+  const url = (input.value || '').trim();
+  if (!url) {
+    showToast?.('Primero selecciona o sube una imagen', 'error');
+    return;
+  }
+  abrirRecorteDesdeUrl(url, {
+    aspect: picker.dataset.aspect || '4:3',
+    aspectLabel: picker.dataset.aspectLabel || picker.dataset.aspect || '4:3',
+    context: context || picker.dataset.context || 'galeria',
+    onConfirm: async (blob, name) => _mmUploadBlob(picker, blob, name),
+  });
+}
+
+// Inicializa un picker de imagen: clic, cambio de archivo, drag-and-drop y sync de URL manual.
+// Marca el picker con _init=true para evitar doble inicialización.
+function _mmInitImagePicker(picker) {
+  if (picker._init) return;
+  picker._init = true;
+  const dropzone = picker.querySelector('.mm-dropzone');
+  const fileIn   = picker.querySelector('.mm-dz-input');
+  const input    = document.getElementById(picker.dataset.target);
+
+  // Clic en la zona abre el selector nativo de archivos
+  dropzone.addEventListener('click', () => fileIn.click());
+  fileIn.addEventListener('change', () => {
+    if (fileIn.files[0]) _mmUpload(picker, fileIn.files[0]);
+    fileIn.value = '';
+  });
+
+  // Eventos de drag-and-drop: resalta la zona al arrastrar, procesa el archivo al soltar
+  ['dragenter','dragover'].forEach(ev => {
+    dropzone.addEventListener(ev, e => {
+      e.preventDefault(); e.stopPropagation();
+      dropzone.classList.add('is-drag');
+    });
+  });
+  ['dragleave','drop'].forEach(ev => {
+    dropzone.addEventListener(ev, e => {
+      e.preventDefault(); e.stopPropagation();
+      dropzone.classList.remove('is-drag');
+    });
+  });
+  dropzone.addEventListener('drop', e => {
+    const f = e.dataTransfer?.files?.[0];
+    if (f) _mmUpload(picker, f);
+  });
+
+  // Sync preview cuando se escribe la URL a mano
+  input.addEventListener('input', () => _mmShowPreview(picker, input.value.trim()));
+  // Estado inicial (por si ya viene con valor al abrir el modal en edición)
+  _mmShowPreview(picker, input.value.trim());
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('.mm-image-picker').forEach(_mmInitImagePicker);
+});
+
+// ─── Galería de imágenes ─────────────────────────────────────────────────────
+// La galería opera de forma asíncrona: filtra, lista y elimina imágenes del
+// servidor sin recarga de página. Al seleccionar una imagen se asigna al
+// input del picker que abrió la galería.
+const GALERIA_LISTAR_URL   = '{% url "gerente:listar_imagenes" %}';
+const GALERIA_ELIMINAR_URL = '{% url "gerente:eliminar_imagen" %}';
+let _galTargetInput   = null; // id del input donde poner la url seleccionada
+let _galTargetPreview = null;
+let _galTargetContext = 'galeria'; // contexto del picker que abrió la galería
+
+// Abre el modal de galería asociándolo al picker que lo invocó.
+function openGaleria(targetInputId, targetPreviewId, context) {
+  _galTargetInput   = targetInputId;
+  _galTargetPreview = targetPreviewId;
+  _galTargetContext = context || 'galeria';
+  galLimpiar();
+  new bootstrap.Modal(document.getElementById('galeriaModal')).show();
+}
+
+// Limpia los filtros de búsqueda y recarga la galería desde cero.
+function galLimpiar() {
+  ['galQ','galDesde','galHasta'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+  cargarGaleria();
+}
+
+// Convierte bytes a formato legible (B / KB / MB).
+function _fmtSize(b) {
+  if (b < 1024) return b + ' B';
+  if (b < 1024*1024) return (b/1024).toFixed(1) + ' KB';
+  return (b/(1024*1024)).toFixed(2) + ' MB';
+}
+
+// Consulta el endpoint de listado con los filtros activos y renderiza el grid de imágenes.
+async function cargarGaleria() {
+  const q     = document.getElementById('galQ')?.value || '';
+  const desde = document.getElementById('galDesde')?.value || '';
+  const hasta = document.getElementById('galHasta')?.value || '';
+  const params = new URLSearchParams({ q, desde, hasta });
+  const grid  = document.getElementById('galGrid');
+  const count = document.getElementById('galCount');
+  grid.innerHTML = '<div class="text-center py-4 w-100" style="grid-column:1/-1;color:var(--mm-text-muted);">Cargando…</div>';
+  try {
+    const res  = await fetch(GALERIA_LISTAR_URL + '?' + params.toString());
+    const data = await res.json();
+    const items = data.items || [];
+    count.textContent = items.length + ' imagen' + (items.length === 1 ? '' : 'es');
+    if (!items.length) {
+      grid.innerHTML = '<div class="text-center py-5 w-100" style="grid-column:1/-1;color:var(--mm-text-muted);"><i class="bi bi-inbox" style="font-size:2.5rem;display:block;margin-bottom:.5rem;"></i><div style="font-size:.85rem;">Sin imágenes que coincidan</div></div>';
+      return;
+    }
+    grid.innerHTML = items.map(it => {
+      const safeUrl    = it.url.replace(/'/g, "\\'");
+      const safeNombre = it.nombre.replace(/'/g, "\\'");
+      return `
+      <div class="gal-card" onclick="galSeleccionar('${safeUrl}')">
+        <button type="button" class="gal-action gal-crop" title="Recortar / ajustar imagen"
+                onclick="event.stopPropagation(); galRecortar('${safeUrl}','${safeNombre}')">
+          <i class="bi bi-crop"></i>
+        </button>
+        <button type="button" class="gal-action gal-del" title="Eliminar imagen"
+                onclick="event.stopPropagation(); galEliminar('${safeNombre}')">
+          <i class="bi bi-trash"></i>
+        </button>
+        <img class="gal-thumb" src="${it.url}" alt="" loading="lazy" onerror="this.style.background='#fee';this.alt='!';">
+        <div class="gal-info">
+          <div class="gal-name" title="${it.nombre}">${it.nombre}</div>
+          <div class="gal-meta"><span>${it.fecha}</span><span>${_fmtSize(it.tamano)}</span></div>
+        </div>
+      </div>`;
+    }).join('');
+  } catch (e) {
+    grid.innerHTML = '<div class="text-center py-4 w-100" style="grid-column:1/-1;color:var(--mm-danger);">Error al cargar imágenes</div>';
+  }
+}
+
+// Asigna la URL de la imagen seleccionada al input del picker y cierra la galería.
+function galSeleccionar(url) {
+  if (!_galTargetInput) return;
+  const inp = document.getElementById(_galTargetInput);
+  if (!inp) return;
+  inp.value = url;
+  inp.dispatchEvent(new Event('input', { bubbles: true }));
+  bootstrap.Modal.getInstance(document.getElementById('galeriaModal'))?.hide();
+  showToast?.('Imagen seleccionada', 'success');
+}
+
+// Recortar una imagen ya existente desde la galería. Usa el contexto del
+// picker que abrió la galería (si lo hubo). El resultado se sube como una
+// imagen nueva — la original se conserva.
+function galRecortar(url, nombre) {
+  const ctx    = _galTargetContext || 'galeria';
+  const aspect = CROP_CONTEXT_DEFAULT_ASPECT[ctx] || 'libre';
+  abrirRecorteDesdeUrl(url, {
+    aspect,
+    aspectLabel: aspect === 'libre' ? 'Libre' : `${aspect} · ${ctx}`,
+    context: ctx,
+    onConfirm: async (blob, name) => {
+      const fd = new FormData();
+      fd.append('imagen', blob, name || nombre || 'imagen.jpg');
+      try {
+        const res  = await fetch(UPLOAD_URL, {
+          method: 'POST',
+          headers: { 'X-CSRFToken': CSRF },
+          body: fd,
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) {
+          showToast?.(data.error || `Error ${res.status}`, 'error');
+          return;
+        }
+        showToast?.('Imagen recortada y subida', 'success');
+        // Si la galería fue abierta desde un picker, asigna la nueva URL al input
+        // (el usuario probablemente abrió la galería para usar esta imagen).
+        if (_galTargetInput) {
+          const inp = document.getElementById(_galTargetInput);
+          if (inp) {
+            inp.value = data.url;
+            inp.dispatchEvent(new Event('input', { bubbles: true }));
+          }
+          // Cerrar galería y quedarnos con el resultado
+          bootstrap.Modal.getInstance(document.getElementById('galeriaModal'))?.hide();
+        } else {
+          cargarGaleria();
+        }
+      } catch (e) {
+        showToast?.('Error de red al subir', 'error');
+      }
+    },
+  });
+}
+
+// Elimina la imagen del servidor y actualiza la galería; informa si estaba referenciada.
+async function galEliminar(nombre) {
+  if (!(await _confirm(`¿Eliminar "${nombre}" del servidor?`))) return;
+  try {
+    const res = await fetch(GALERIA_ELIMINAR_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+      body: JSON.stringify({ nombre }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok) {
+      showToast?.(data.error || `Error ${res.status}`, 'error');
+      return;
+    }
+    let msg = 'Imagen eliminada';
+    const lim = data.limpiados;
+    if (lim && (lim.productos || lim.promociones)) {
+      msg += ` (referenciada en ${lim.productos} producto(s), ${lim.promociones} promo(s))`;
+    }
+    showToast?.(msg, 'success');
+    cargarGaleria();
+  } catch (e) {
+    showToast?.('Error de red al eliminar', 'error');
+  }
+}
+
+// Sube una imagen nueva desde la galería pasando por el recorte en ratio libre.
+async function galSubir(fileInput) {
+  const file = fileInput.files[0];
+  fileInput.value = '';
+  if (!file) return;
+  if (file.size > 5 * 1024 * 1024) { showToast?.('Imagen mayor a 5 MB', 'error'); return; }
+  // Galería: ratio libre (NaN) — el usuario puede ajustar a lo que necesite.
+  abrirRecorte(file, {
+    aspect: 'libre',
+    aspectLabel: 'Libre — ajusta como quieras',
+    onConfirm: async (blob, name) => {
+      const fd = new FormData();
+      fd.append('imagen', blob, name || 'imagen.jpg');
+      try {
+        const res = await fetch(UPLOAD_URL, {
+          method: 'POST',
+          headers: { 'X-CSRFToken': CSRF },
+          body: fd,
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) {
+          showToast?.(data.error || `Error ${res.status}`, 'error');
+          return;
+        }
+        showToast?.('Imagen subida', 'success');
+        cargarGaleria();
+      } catch (e) {
+        showToast?.('Error de red al subir', 'error');
+      }
+    },
+  });
+}
+
+// Wrapper de confirmación: delega en mmConfirm (modal personalizado) o en confirm() nativo.
+function _confirm(msg) {
+  if (typeof mmConfirm === 'function') return mmConfirm(msg);
+  return Promise.resolve(confirm(msg));
+}
+// Filtra la tabla de productos en cliente por nombre (data-name) y categoría (data-cat).
+function filterProducts(){const q=(document.getElementById('searchProd')?.value||'').toLowerCase(),cat=document.getElementById('filterCat')?.value||'';document.querySelectorAll('#productsTable tr').forEach(tr=>{tr.style.display=(!q||(tr.dataset.name||'').includes(q))&&(!cat||tr.dataset.cat===cat)?'':'none';});}
+// Filtra las tarjetas de grupos de modificadores por nombre o nombre de producto asociado.
+// Muestra un mensaje vacío si ninguna tarjeta coincide con la búsqueda.
+function filterModificadores(){
+  const q = (document.getElementById('searchMod')?.value || '').toLowerCase().trim();
+  let visible = 0;
+  document.querySelectorAll('.mod-card').forEach(card => {
+    const nombre    = (card.dataset.modNombre    || '').toLowerCase();
+    const productos = (card.dataset.modProductos || '').toLowerCase();
+    const match = !q || nombre.includes(q) || productos.includes(q);
+    card.style.display = match ? '' : 'none';
+    if (match) visible++;
+  });
+  // Mostrar mensaje si no hay coincidencias
+  let empty = document.getElementById('modEmptySearch');
+  if (!empty) {
+    empty = document.createElement('div');
+    empty.id = 'modEmptySearch';
+    empty.className = 'text-center py-4';
+    empty.style.color = 'var(--mm-text-muted)';
+    empty.innerHTML = '<i class="bi bi-search" style="font-size:1.5rem;display:block;margin-bottom:.35rem;"></i><p style="font-size:.875rem;">Sin resultados para esa búsqueda.</p>';
+    document.querySelector('.mod-card')?.parentElement?.appendChild(empty);
+  }
+  empty.style.display = (visible === 0 && q) ? '' : 'none';
+}
+// Helper para asignar valor a un input y disparar evento input (actualiza previews).
+function _setVal(id, v){const el=document.getElementById(id);if(!el)return;el.value=v;el.dispatchEvent(new Event('input',{bubbles:true}));}
+// Prepara el modal de producto para creación y lo abre.
+function openNewProduct(){document.getElementById('productModalTitle').textContent='Nuevo producto';document.getElementById('productForm').action='{% url "gerente:productos_nuevo" %}';['pNombre','pPrecio','pDesc','pImagen'].forEach(id=>_setVal(id,''));document.getElementById('pDisponible').checked=true;document.getElementById('pCategoria').value='';new bootstrap.Modal(document.getElementById('productModal')).show();}
+// Rellena el modal de producto con los datos del registro y lo abre para edición.
+function openEditProduct(id,nombre,desc,precio,catId,disponible,img){document.getElementById('productModalTitle').textContent='Editar producto';document.getElementById('productForm').action='{% url "gerente:producto_editar" 0 %}'.replace('/0/',`/${id}/`);_setVal('pNombre',nombre);_setVal('pPrecio',precio);_setVal('pDesc',desc);_setVal('pImagen',img);document.getElementById('pDisponible').checked=disponible;document.getElementById('pCategoria').value=catId;new bootstrap.Modal(document.getElementById('productModal')).show();}
+// Activa o desactiva un producto (soft-delete). El historial de pedidos se conserva.
+async function toggleProduct(id, disponible) {
+  const accion = disponible ? 'desactivar' : 'activar';
+  if (!await _confirm(`¿Deseas ${accion} este producto? Los productos desactivados no aparecen en el menú, pero su historial se conserva.`)) return;
+  const res = await fetch('{% url "gerente:producto_eliminar" 0 %}'.replace('/0/',`/${id}/`),{method:'POST',headers:{'X-CSRFToken':CSRF}});
+  if (res.ok) { showToast(disponible ? 'Producto desactivado' : 'Producto activado', 'success'); setTimeout(()=>location.reload(), 800); }
+  else showToast('Error al cambiar estado del producto', 'error');
+}
+// Elimina una categoría solo si no tiene productos activos; muestra error en caso contrario.
+async function deleteCategoria(id,nombre){if(!await _confirm(`¿Eliminar "${nombre}"? Solo es posible si no tiene productos activos.`))return;const res=await fetch('{% url "gerente:categoria_eliminar" 0 %}'.replace('/0/',`/${id}/`),{method:'POST',headers:{'X-CSRFToken':CSRF}});const d=await res.json();if(d.ok){showToast('Categoría eliminada','success');setTimeout(()=>location.reload(),800);}else showToast(d.error||'No se puede eliminar','error');}
+
+// ─── Editar categoría ───────────────────────────────────────────────────────
+// Rellena el modal de edición de categoría y lo abre.
+function editarCategoria(id, nombre, orden, area) {
+  document.getElementById('editCatId').value     = id;
+  document.getElementById('editCatNombre').value = nombre;
+  document.getElementById('editCatOrden').value  = orden;
+  document.getElementById('editCatArea').value   = area;
+  new bootstrap.Modal(document.getElementById('editCatModal')).show();
+}
+// Envía los cambios de la categoría al backend vía POST con FormData y recarga la página.
+async function guardarCategoria() {
+  const id = document.getElementById('editCatId').value;
+  const fd = new FormData();
+  fd.append('nombre', document.getElementById('editCatNombre').value.trim());
+  fd.append('orden',  document.getElementById('editCatOrden').value || 0);
+  fd.append('area',   document.getElementById('editCatArea').value);
+  try {
+    const res = await fetch('{% url "gerente:categoria_editar" 0 %}'.replace('/0/', `/${id}/`), {
+      method: 'POST', headers: { 'X-CSRFToken': CSRF }, body: fd,
+    });
+    const d = await res.json();
+    if (d.ok) {
+      showToast('Categoría actualizada', 'success');
+      setTimeout(() => location.reload(), 700);
+    } else {
+      showToast(d.error || 'No se pudo guardar', 'error');
+    }
+  } catch (e) {
+    showToast('Error de red', 'error');
+  }
+}
+
+// ─── Editar mesa ────────────────────────────────────────────────────────────
+// Configura la action del formulario de edición, rellena los campos y abre el modal.
+function editarMesa(id, numero, capacidad, ubicacionId) {
+  const form = document.getElementById('editMesaForm');
+  form.action = '{% url "gerente:mesa_editar" 0 %}'.replace('/0/', `/${id}/`);
+  document.getElementById('editMesaNumero').value     = numero;
+  document.getElementById('editMesaCapacidad').value  = capacidad;
+  document.getElementById('editMesaUbicacion').value  = ubicacionId || '';
+  new bootstrap.Modal(document.getElementById('editMesaModal')).show();
+}
+let opcionCount=0;
+let _editingGrupoId = null;  // null = crear, número = editar
+
+// Resetea el modal de modificador para creación de un nuevo grupo y lo abre.
+function openNewModificador(){
+  _editingGrupoId = null;
+  document.querySelector('#modModal .modal-title').textContent = 'Nuevo grupo de modificadores';
+  document.querySelector('#modModal .btn-primary').textContent = 'Guardar grupo';
+  document.getElementById('mNombre').value='';
+  document.querySelectorAll('#mProducto option').forEach(o=>o.selected=false);
+  document.getElementById('mTipo').value='única';
+  document.getElementById('mMax').value='';
+  document.getElementById('mObligatorio').checked=false;
+  document.getElementById('opcionesContainer').innerHTML='';
+  opcionCount=0;addOpcion();addOpcion();
+  new bootstrap.Modal(document.getElementById('modModal')).show();
+}
+
+// Carga los datos del grupo desde el backend y rellena el modal de edición.
+async function editarGrupo(id){
+  try {
+    const res = await fetch('{% url "gerente:modificador_editar" 0 %}'.replace('/0/',`/${id}/`));
+    const d = await res.json();
+    if (!d.ok) { showToast('Error al cargar el grupo', 'error'); return; }
+    const g = d.grupo;
+    _editingGrupoId = id;
+    document.querySelector('#modModal .modal-title').textContent = 'Editar grupo de modificadores';
+    document.querySelector('#modModal .btn-primary').textContent = 'Actualizar grupo';
+    document.getElementById('mNombre').value = g.nombre_grupo;
+    document.getElementById('mTipo').value = g.tipo;
+    document.getElementById('mMax').value = g.max_selecciones || '';
+    document.getElementById('mObligatorio').checked = g.es_obligatorio;
+    // Productos
+    document.querySelectorAll('#mProducto option').forEach(o => {
+      o.selected = g.producto_ids.includes(parseInt(o.value));
+    });
+    // Opciones
+    document.getElementById('opcionesContainer').innerHTML = '';
+    opcionCount = 0;
+    g.opciones.forEach(op => addOpcion(op.nombre, op.precio_extra, op.id));
+    if (!g.opciones.length) { addOpcion(); addOpcion(); }
+    new bootstrap.Modal(document.getElementById('modModal')).show();
+  } catch(e) { showToast('Error de red', 'error'); }
+}
+
+// Agrega una fila de opción (nombre + precio extra) al contenedor dinámico del modal.
+// opId se usa en edición para hacer upsert seguro en el backend.
+function addOpcion(nombre='', extra=0, opId=null){
+  const div=document.createElement('div');
+  div.className='row g-2 mb-2 align-items-center';
+  div.dataset.opId = opId || '';
+  div.innerHTML=`<div class="col-6"><input type="text" maxlength="100" data-upper class="form-control form-control-sm op-nombre" placeholder="Nombre de la opción" value="${nombre}" style="border-color:var(--mm-border);"></div><div class="col-4"><div class="input-group input-group-sm"><span class="input-group-text" style="background:var(--mm-cream);border-color:var(--mm-border);">+$</span><input type="number" class="form-control op-extra" value="${extra}" step="0.50" min="0" style="border-color:var(--mm-border);"></div></div><div class="col-2"><button type="button" class="btn btn-sm w-100" style="background:var(--mm-cream-dark);" onclick="this.closest('.row').remove()"><i class="bi bi-x-lg"></i></button></div>`;
+  document.getElementById('opcionesContainer').appendChild(div);
+}
+
+// Valida y envía el grupo de modificadores (crear o actualizar) al backend como JSON.
+// Reutiliza el mismo endpoint: si _editingGrupoId tiene valor se hace PUT, si no POST.
+async function saveModificador(){
+  const nombre=document.getElementById('mNombre').value.trim();
+  const producto_ids=[...document.querySelectorAll('#mProducto option:checked')].map(o=>o.value);
+  if(!nombre||!producto_ids.length){showToast('Completa nombre y al menos un producto','error');return;}
+  const opciones=[];
+  document.querySelectorAll('#opcionesContainer .row').forEach(row=>{
+    const n=row.querySelector('.op-nombre').value.trim();
+    const e=parseFloat(row.querySelector('.op-extra').value)||0;
+    if(!n) return;
+    const entry={nombre:n,precio_extra:e};
+    // Incluir id si existe (permite upsert seguro en el backend)
+    if(row.dataset.opId) entry.id=parseInt(row.dataset.opId);
+    opciones.push(entry);
+  });
+  if(!opciones.length){showToast('Agrega al menos una opción','error');return;}
+  const btn=document.querySelector('#modModal .btn-primary');btn.disabled=true;
+  try{
+    const url = _editingGrupoId
+      ? '{% url "gerente:modificador_editar" 0 %}'.replace('/0/',`/${_editingGrupoId}/`)
+      : '{% url "gerente:modificador_crear" %}';
+    const res=await fetch(url,{
+      method:'POST',headers:{'Content-Type':'application/json','X-CSRFToken':CSRF},
+      body:JSON.stringify({nombre_grupo:nombre,producto_ids,tipo:document.getElementById('mTipo').value,
+        es_obligatorio:document.getElementById('mObligatorio').checked,
+        max_selecciones:document.getElementById('mMax').value||null,opciones})
+    });
+    const d=await res.json();
+    if(d.ok){bootstrap.Modal.getInstance(document.getElementById('modModal')).hide();location.reload();}
+    else showToast(d.error||'Error','error');
+  }finally{btn.disabled=false;}
+}
+// Elimina un grupo de modificadores y todas sus opciones.
+async function deleteGrupo(id){if(!await _confirm('¿Eliminar este grupo y todas sus opciones? Esta acción no se puede deshacer.'))return;const res=await fetch('{% url "gerente:modificador_eliminar" 0 %}'.replace('/0/',`/${id}/`),{method:'POST',headers:{'X-CSRFToken':CSRF}});const d=await res.json();if(d.ok){showToast('Grupo eliminado','success');setTimeout(()=>location.reload(),800);}else showToast(d.error||'Error al eliminar','error');}
+// Alterna el estado de plantilla del grupo y actualiza el icono del botón sin recargar.
+async function togglePlantilla(id, btn){const res=await fetch('{% url "gerente:modificador_toggle_plantilla" 0 %}'.replace('/0/',`/${id}/`),{method:'POST',headers:{'X-CSRFToken':CSRF}});const d=await res.json();if(d.ok){const ico=btn.querySelector('i');ico.className=d.es_plantilla?'bi bi-bookmark-fill':'bi bi-bookmark';btn.style.color=d.es_plantilla?'var(--mm-gold)':'var(--mm-text-muted)';btn.title=d.es_plantilla?'Quitar plantilla':'Marcar como plantilla';showToast(d.es_plantilla?'Marcado como plantilla':'Plantilla eliminada','success');}}
+
+// Datos de plantillas embebidos en el HTML para acceso en cliente sin petición extra.
+const PLANTILLAS_DATA = {
+  {% for pt in plantillas %}"{{ pt.id }}": {nombre:"{{ pt.nombre_grupo|escapejs }}", tipo:"{{ pt.tipo }}", es_obligatorio:{{ pt.es_obligatorio|yesno:"true,false" }}, max_selecciones:{{ pt.max_selecciones|default:"null" }}, opciones:[{% for op in pt.opciones.all %}{nombre:"{{ op.nombre_opcion|escapejs }}", precio_extra:{{ op.precio_extra }}}{% if not forloop.last %},{% endif %}{% endfor %}]},{% endfor %}
+};
+
+// Copia nombre, tipo, opciones y configuración de la plantilla seleccionada al formulario.
+function aplicarPlantilla(){
+  const sel = document.getElementById('mPlantilla');
+  if (!sel || !sel.value) { showToast('Selecciona una plantilla','error'); return; }
+  const pt = PLANTILLAS_DATA[sel.value];
+  if (!pt) return;
+  document.getElementById('mNombre').value = pt.nombre;
+  document.getElementById('mTipo').value = pt.tipo;
+  document.getElementById('mObligatorio').checked = pt.es_obligatorio;
+  document.getElementById('mMax').value = pt.max_selecciones || '';
+  // Reset opciones
+  document.getElementById('opcionesContainer').innerHTML = '';
+  opcionCount = 0;
+  pt.opciones.forEach(op => {
+    addOpcion();
+    const rows = document.querySelectorAll('#opcionesContainer .row');
+    const last = rows[rows.length - 1];
+    last.querySelector('.op-nombre').value = op.nombre;
+    last.querySelector('.op-extra').value = op.precio_extra;
+  });
+  if (!pt.opciones.length) { addOpcion(); addOpcion(); }
+  showToast(`Plantilla "${pt.nombre}" aplicada`, 'success');
+}
+// Ajusta la visibilidad y etiquetas de los campos del formulario de promoción
+// según el tipo de descuento elegido (Porcentaje, Monto fijo, 2x1, etc.).
+function onPromoTipoChange(sel) {
+  const desc = sel.options[sel.selectedIndex]?.dataset.desc || '';
+  const fieldValor = document.getElementById('fieldValorDescuento');
+  const fieldCant  = document.getElementById('fieldCantidadMinima');
+  const fieldBen   = document.getElementById('fieldProductosBeneficiados');
+  const info2x1    = document.getElementById('promo2x1Info');
+  const labelValor = document.getElementById('labelValorDescuento');
+  const promoValor = document.getElementById('promoValor');
+  const aplicacion = document.getElementById('promoAplicacion');
+  const hint       = document.getElementById('promoTipoHint');
+
+  const hints = {
+    'Porcentaje':      'Ej: 15% de descuento → cada producto seleccionado se cobra al 85% de su precio.',
+    'Monto fijo':      'Ej: $20 de descuento → se resta un monto fijo del total del ticket.',
+    '2x1':             'Lleva 2 productos y paga solo 1. El cliente obtiene el de menor precio gratis.',
+    'Lleva X paga Y':  'Ej: lleva 3 paga 2 → pon Pagas=2 y Cantidad mínima=3.',
+    'Combo precio fijo':'Ej: Combo especial por $99. Elige los productos del combo en "Productos beneficiados".',
+  };
+  if (hint) {
+    const msg = hints[desc] || '';
+    hint.textContent = msg;
+    hint.style.display = msg ? 'block' : 'none';
+  }
+
+  fieldValor.style.display=''; fieldCant.style.display='none';
+  fieldBen.style.display='none'; info2x1.style.display='none';
+  if(desc==='2x1'){fieldValor.style.display='none';info2x1.style.display='';}
+  else if(desc==='Porcentaje'){labelValor.textContent='Descuento % *';promoValor.placeholder='ej. 15';}
+  else if(desc==='Monto fijo'){labelValor.textContent='Monto ($) *';promoValor.placeholder='ej. 20';}
+  else if(desc==='Lleva X paga Y'){labelValor.textContent='Pagas (Y) *';promoValor.placeholder='ej. 2';fieldCant.style.display='';}
+  else if(desc==='Combo precio fijo'){labelValor.textContent='Precio combo ($) *';promoValor.placeholder='ej. 99';fieldBen.style.display='';aplicacion.value='combo';}
+}
+
+// ─── Selector visual de días de la semana para promociones ───────────────────
+// Los chips activos se pintan en verde; el cambio se dispara con el evento 'change'.
+function _refrescaDiasUI() {
+  document.querySelectorAll('#promoDiasSemana .dia-chk').forEach(lbl => {
+    const cb = lbl.querySelector('input[type="checkbox"]');
+    if (cb && cb.checked) {
+      lbl.style.background = 'var(--mm-green)';
+      lbl.style.color = '#fff';
+      lbl.style.borderColor = 'var(--mm-green)';
+    } else {
+      lbl.style.background = '';
+      lbl.style.color = '';
+      lbl.style.borderColor = 'var(--mm-border)';
+    }
+  });
+}
+document.addEventListener('change', e => {
+  if (e.target.matches('#promoDiasSemana input[type="checkbox"]')) _refrescaDiasUI();
+});
+
+// Marca como seleccionados los checkboxes de días que vengan en arrDias y refresca la UI.
+function _setDiasSeleccionados(arrDias) {
+  const set = new Set((arrDias || []).map(String));
+  document.querySelectorAll('#promoDiasSemana input[name="dias_semana"]')
+    .forEach(cb => { cb.checked = set.has(String(cb.value)); });
+  _refrescaDiasUI();
+}
+
+// ─── Edición de promociones ─────────────────────────────────────────────────
+// Carga los datos de la promo desde el backend y rellena el modal para edición.
+async function editarPromo(id) {
+  const res = await fetch(`/gerente/menu/promociones/${id}/editar/`);
+  const promo = await res.json();
+  if (!promo.id) return;
+
+  document.getElementById('promoId').value = promo.id;
+  document.getElementById('promoForm').action = `/gerente/menu/promociones/${id}/editar/`;
+  document.querySelector('#promoModal .modal-title').textContent = 'Editar promoción';
+  document.querySelector('#promoModal [type="submit"]').textContent = 'Actualizar promoción';
+
+  document.querySelector('input[name="titulo"]').value = promo.titulo;
+  document.getElementById('promoDescripcionCorta').value = promo.descripcion_corta || '';
+  document.getElementById('promoOrden').value = promo.orden ?? 0;
+  document.getElementById('promoTipoDescuento').value = promo.tipo_descuento_id;
+  document.getElementById('promoAplicacion').value = promo.aplicacion;
+  document.getElementById('promoValor').value = promo.valor_descuento || '';
+  document.querySelector('input[name="cantidad_minima"]').value = promo.cantidad_minima || '';
+  document.querySelector('input[name="fecha_inicio"]').value = promo.fecha_inicio;
+  document.querySelector('input[name="fecha_fin"]').value = promo.fecha_fin;
+  _setVal('promoImagenUrl', promo.imagen_url || '');
+  if (typeof _clearPromoErrors === 'function') _clearPromoErrors();
+
+  // Seleccionar productos aplicables
+  const selectAplicables = document.querySelector('select[name="productos_aplicables"]');
+  [...selectAplicables.options].forEach(opt => {
+    opt.selected = promo.productos_aplicables.includes(parseInt(opt.value));
+  });
+
+  // Seleccionar productos beneficiados
+  const selectBeneficiados = document.querySelector('select[name="productos_beneficiados"]');
+  if (selectBeneficiados) {
+    [...selectBeneficiados.options].forEach(opt => {
+      opt.selected = promo.productos_beneficiados.includes(parseInt(opt.value));
+    });
+  }
+
+  // Días de la semana (array de ints o string "0,1,4")
+  let diasArr = promo.dias_semana || [];
+  if (typeof diasArr === 'string') {
+    diasArr = diasArr.split(',').map(s => s.trim()).filter(Boolean);
+  }
+  _setDiasSeleccionados(diasArr);
+
+  // 1.5: pre-marcar "requiere todos los productos" (modo combo)
+  const reqTodos = document.getElementById('promoRequiereTodos');
+  if (reqTodos) reqTodos.checked = !!promo.requiere_todos_productos;
+
+  onPromoTipoChange(document.getElementById('promoTipoDescuento'));
+  new bootstrap.Modal(document.getElementById('promoModal')).show();
+}
+
+// Resetea el modal de promoción para crear una nueva oferta y lo abre.
+function openNewPromo() {
+  document.getElementById('promoId').value = '';
+  document.getElementById('promoForm').action = '{% url "gerente:promociones" %}';
+  _setVal('promoImagenUrl', '');
+  document.querySelector('#promoModal .modal-title').textContent = 'Nueva promoción';
+  document.querySelector('#promoModal [type="submit"]').textContent = 'Crear promoción';
+
+  document.querySelector('input[name="titulo"]').value = '';
+  document.getElementById('promoDescripcionCorta').value = '';
+  document.getElementById('promoOrden').value = '0';
+  document.getElementById('promoTipoDescuento').selectedIndex = 0;
+  document.getElementById('promoAplicacion').value = 'item';
+  document.getElementById('promoValor').value = '';
+  document.querySelector('input[name="cantidad_minima"]').value = '';
+  document.querySelector('input[name="fecha_inicio"]').value = '';
+  document.querySelector('input[name="fecha_fin"]').value = '';
+  if (typeof _clearPromoErrors === 'function') _clearPromoErrors();
+
+  const selectAplicables = document.querySelector('select[name="productos_aplicables"]');
+  [...selectAplicables.options].forEach(opt => opt.selected = false);
+  const selectBeneficiados = document.querySelector('select[name="productos_beneficiados"]');
+  if (selectBeneficiados) [...selectBeneficiados.options].forEach(opt => opt.selected = false);
+
+  _setDiasSeleccionados([]);
+
+  // 1.5: limpiar el checkbox de "requiere todos" para una promo nueva
+  const reqTodos = document.getElementById('promoRequiereTodos');
+  if (reqTodos) reqTodos.checked = false;
+
+  onPromoTipoChange(document.getElementById('promoTipoDescuento'));
+  new bootstrap.Modal(document.getElementById('promoModal')).show();
+}
+
+// 2.1: validación client-side del modal de promoción. Devuelve true si el form
+// es válido; en caso contrario marca los campos rojos y muestra mensajes
+// específicos por campo (los mismos límites que el backend re-valida).
+function _promoFieldError(name, msg) {
+  const field = document.querySelector(`#promoForm [name="${name}"]`);
+  const errEl = document.querySelector(`#promoForm [data-error-for="${name}"]`);
+  if (field) field.classList.toggle('is-invalid', !!msg);
+  if (errEl) {
+    errEl.textContent = msg || '';
+    errEl.style.display = msg ? 'block' : 'none';
+  }
+}
+function _clearPromoErrors() {
+  document.querySelectorAll('#promoForm .is-invalid').forEach(el => el.classList.remove('is-invalid'));
+  document.querySelectorAll('#promoForm .promo-field-error').forEach(el => {
+    el.textContent = ''; el.style.display = 'none';
+  });
+}
+function validarPromoForm() {
+  _clearPromoErrors();
+  let ok = true;
+  const titulo = document.getElementById('promoTitulo').value.trim();
+  if (titulo.length < 3) { _promoFieldError('titulo', 'El título debe tener al menos 3 caracteres.'); ok = false; }
+  else if (titulo.length > 100) { _promoFieldError('titulo', 'Máximo 100 caracteres.'); ok = false; }
+
+  const desc = document.getElementById('promoDescripcionCorta').value;
+  if (desc.length > 120) { _promoFieldError('descripcion_corta', 'Máximo 120 caracteres.'); ok = false; }
+
+  const ordenStr = document.getElementById('promoOrden').value;
+  const orden = parseInt(ordenStr, 10);
+  if (ordenStr === '' || !Number.isInteger(orden) || orden < 0 || orden > 32767) {
+    _promoFieldError('orden', 'Entero entre 0 y 32767.'); ok = false;
+  }
+
+  const tipoSel = document.getElementById('promoTipoDescuento');
+  const tipoId  = tipoSel.value;
+  const tipoDesc = tipoSel.options[tipoSel.selectedIndex]?.dataset.desc || '';
+  if (!tipoId) { _promoFieldError('tipo_descuento_id', 'Selecciona un tipo de descuento.'); ok = false; }
+
+  const valorStr = document.getElementById('promoValor').value;
+  const valor    = parseFloat(valorStr);
+  if (tipoDesc !== '2x1') {
+    if (valorStr === '' || !isFinite(valor) || valor < 0) {
+      _promoFieldError('valor_descuento', 'Ingresa un valor numérico positivo.'); ok = false;
+    } else if (tipoDesc === 'Porcentaje' && (valor <= 0 || valor > 100)) {
+      _promoFieldError('valor_descuento', 'El porcentaje debe estar entre 1 y 100.'); ok = false;
+    } else if (valor > 99999999.99) {
+      _promoFieldError('valor_descuento', 'Excede el máximo permitido (99,999,999.99).'); ok = false;
+    } else if (valorStr.includes('.') && valorStr.split('.')[1].length > 2) {
+      _promoFieldError('valor_descuento', 'Máximo 2 decimales.'); ok = false;
+    }
+  }
+
+  if (tipoDesc === 'Lleva X paga Y') {
+    const cantStr = document.getElementById('promoCantidadMinima').value;
+    const cant    = parseInt(cantStr, 10);
+    if (cantStr === '' || !Number.isInteger(cant) || cant < 2) {
+      _promoFieldError('cantidad_minima', 'Debe ser un entero ≥ 2.'); ok = false;
+    } else if (Number.isFinite(valor) && cant <= valor) {
+      _promoFieldError('cantidad_minima', 'La cantidad llevada (X) debe ser mayor que la pagada (Y).'); ok = false;
+    }
+  }
+
+  const fi = document.getElementById('promoFechaInicio').value;
+  const ff = document.getElementById('promoFechaFin').value;
+  if (!fi) { _promoFieldError('fecha_inicio', 'Indica la fecha de inicio.'); ok = false; }
+  if (!ff) { _promoFieldError('fecha_fin', 'Indica la fecha de fin.'); ok = false; }
+  if (fi && ff && new Date(fi) >= new Date(ff)) {
+    _promoFieldError('fecha_fin', 'La fecha fin debe ser posterior al inicio.'); ok = false;
+  }
+
+  const reqTodos = document.getElementById('promoRequiereTodos').checked;
+  const aplicables = [...document.getElementById('promoProductosAplicables').selectedOptions];
+  if (reqTodos && aplicables.length < 2) {
+    _promoFieldError('productos_aplicables', 'Modo combo requiere al menos 2 productos aplicables.'); ok = false;
+  }
+
+  const img = document.getElementById('promoImagenUrl').value;
+  if (img && img.length > 500) {
+    _promoFieldError('imagen_url', 'Máximo 500 caracteres.'); ok = false;
+  }
+
+  if (!ok) {
+    // Mover el foco al primer error para que el gerente lo vea sin scroll a ciegas.
+    const firstErr = document.querySelector('#promoForm .is-invalid');
+    if (firstErr) firstErr.focus();
+    showToast('Revisa los campos marcados.', 'error');
+  }
+  return ok;
+}
+
+// Interceptar submit del form de promoción para correr la validación cliente
+// antes de mandar la petición al backend.
+document.addEventListener('DOMContentLoaded', () => {
+  const form = document.getElementById('promoForm');
+  if (form) {
+    form.addEventListener('submit', (e) => {
+      if (!validarPromoForm()) e.preventDefault();
+    });
+  }
+});
+
+// Activa o desactiva una promoción; revierte el switch si el backend responde con error.
+async function togglePromo(id,cb){const res=await fetch('{% url "gerente:promocion_toggle" 0 %}'.replace('/0/',`/${id}/`),{method:'POST',headers:{'X-CSRFToken':CSRF}});const d=await res.json();if(!d.ok){cb.checked=!cb.checked;showToast('Error','error');}else{showToast(d.activa?'Promoción activada':'Promoción desactivada','success');setTimeout(()=>location.reload(),800);}}
+// Elimina una promoción de forma permanente previa confirmación del gerente.
+async function deletePromo(id){if(!await _confirm('¿Eliminar esta promoción? Esta acción no se puede deshacer.'))return;const res=await fetch('{% url "gerente:promocion_eliminar" 0 %}'.replace('/0/',`/${id}/`),{method:'POST',headers:{'X-CSRFToken':CSRF}});const dp=await res.json();if(dp.ok){showToast('Promoción eliminada','success');setTimeout(()=>location.reload(),800);}else showToast(dp.error||'Error','error');}
+
+// ─── Gestión de ubicaciones de mesa ─────────────────────────────────────────
+// Las ubicaciones se crean, editan y eliminan sin recargar la página.
+// Los chips y el <select> del formulario de mesa se actualizan en el DOM directamente.
+
+// Muestra / oculta el formulario inline de nueva ubicación y limpia el campo.
+function toggleNuevaUbicacion() {
+  const form = document.getElementById('nuevaUbicacionForm');
+  const input = document.getElementById('nuevaUbicacionNombre');
+  if (form.style.display === 'none') {
+    form.style.display = 'block';
+    input.value = '';
+    input.focus();
+  } else {
+    form.style.display = 'none';
+  }
+}
+
+// Crea una nueva ubicación con el nombre del campo inline; actualiza lista y select sin recargar.
+async function guardarNuevaUbicacion() {
+  const input = document.getElementById('nuevaUbicacionNombre');
+  const nombre = (input.value || '').trim();
+  if (!nombre) { input.focus(); return; }
+  try {
+    const res = await fetch('{% url "gerente:ubicacion_crear" %}', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'X-CSRFToken': CSRF},
+      body: JSON.stringify({nombre})
+    });
+    const d = await res.json();
+    if (d.ok) {
+      // Agregar chip a la lista si no existe ya
+      const lista = document.getElementById('ubicacionesList');
+      const emptyMsg = document.getElementById('ubicacionesEmpty');
+      if (!lista.querySelector(`[data-ub-id="${d.id}"]`)) {
+        const chip = document.createElement('div');
+        chip.className = 'ub-chip';
+        chip.dataset.ubId = d.id;
+        chip.style.cssText = 'display:flex;align-items:center;gap:.4rem;background:#fff;border:1.5px solid var(--mm-border);border-radius:var(--radius-sm);padding:.3rem .65rem;font-size:.8rem;font-weight:600;';
+        chip.innerHTML = `<span class="ub-nombre">${d.nombre}</span>
+          <button class="btn btn-link p-0" style="color:var(--mm-text-muted);font-size:.8rem;line-height:1;" onclick="editarUbicacion(${d.id},'${d.nombre.replace(/'/g,"\\'")}')"><i class="bi bi-pencil"></i></button>
+          <button class="btn btn-link p-0" style="color:#dc3545;font-size:.8rem;line-height:1;" onclick="eliminarUbicacion(${d.id},'${d.nombre.replace(/'/g,"\\'")}')"><i class="bi bi-trash3"></i></button>`;
+        if (emptyMsg) emptyMsg.remove();
+        lista.appendChild(chip);
+      }
+      // Agregar al select del formulario de mesa si no existe
+      const sel = document.getElementById('ubicacionSelect');
+      if (sel && !sel.querySelector(`option[value="${d.id}"]`)) {
+        sel.appendChild(new Option(d.nombre, d.id));
+      }
+      showToast(d.created ? `Ubicación "${d.nombre}" creada` : `Ubicación "${d.nombre}" ya existía`, 'success');
+      toggleNuevaUbicacion();
+    } else {
+      showToast(d.error || 'Error al crear ubicación', 'error');
+    }
+  } catch(e) {
+    showToast('Error de conexión', 'error');
+  }
+}
+
+// Solicita el nombre de una nueva ubicación y la crea vía API; actualiza el select.
+function abrirNuevaUbicacion(){
+  const nombre = prompt('Nombre de la nueva ubicación (ej. Terraza, Interior, Barra):');
+  if (!nombre || !nombre.trim()) return;
+  fetch('{% url "gerente:ubicacion_crear" %}', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json', 'X-CSRFToken': CSRF},
+    body: JSON.stringify({nombre: nombre.trim()})
+  }).then(r => r.json()).then(d => {
+    if (d.ok) {
+      const sel = document.getElementById('ubicacionSelect');
+      if (!sel.querySelector(`option[value="${d.id}"]`)) {
+        const opt = new Option(d.nombre, d.id);
+        sel.appendChild(opt);
+      }
+      sel.value = d.id;
+      showToast(d.created ? `Ubicación "${d.nombre}" creada` : `Ubicación "${d.nombre}" ya existía`, 'success');
+    } else {
+      showToast(d.error || 'Error al crear ubicación', 'error');
+    }
+  });
+}
+
+// Permite renombrar una ubicación; actualiza el chip y el select sin recargar.
+function editarUbicacion(id, nombreActual) {
+  const nuevoNombre = prompt(`Nuevo nombre para "${nombreActual}":`, nombreActual);
+  if (!nuevoNombre || !nuevoNombre.trim() || nuevoNombre.trim() === nombreActual) return;
+  fetch(`/gerente/mesas/ubicacion/${id}/editar/`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json', 'X-CSRFToken': CSRF},
+    body: JSON.stringify({nombre: nuevoNombre.trim()})
+  }).then(r => r.json()).then(d => {
+    if (d.ok) {
+      // Actualizar chip en lista
+      const chip = document.querySelector(`[data-ub-id="${id}"] .ub-nombre`);
+      if (chip) chip.textContent = d.nombre;
+      // Actualizar opción en select
+      const opt = document.querySelector(`#ubicacionSelect option[value="${id}"]`);
+      if (opt) opt.textContent = d.nombre;
+      showToast(`Ubicación renombrada a "${d.nombre}"`, 'success');
+    } else {
+      showToast(d.error || 'Error al editar ubicación', 'error');
+    }
+  });
+}
+
+// Elimina una ubicación solo si no tiene mesas asignadas; remueve el chip y la opción del select.
+async function eliminarUbicacion(id, nombre) {
+  if (!await _confirm(`¿Eliminar la ubicación "${nombre}"? Solo es posible si no tiene mesas asignadas.`)) return;
+  fetch(`/gerente/mesas/ubicacion/${id}/eliminar/`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json', 'X-CSRFToken': CSRF},
+  }).then(r => r.json()).then(d => {
+    if (d.ok) {
+      // Remover chip de la lista
+      const chip = document.querySelector(`[data-ub-id="${id}"]`);
+      if (chip) chip.remove();
+      // Remover del select
+      const opt = document.querySelector(`#ubicacionSelect option[value="${id}"]`);
+      if (opt) opt.remove();
+      // Mostrar estado vacío si no quedan chips
+      const lista = document.getElementById('ubicacionesList');
+      if (lista && !lista.querySelector('[data-ub-id]') && !document.getElementById('ubicacionesEmpty')) {
+        const p = document.createElement('p');
+        p.id = 'ubicacionesEmpty';
+        p.className = 'mb-0';
+        p.style.cssText = 'font-size:.85rem;color:var(--mm-text-muted);';
+        p.innerHTML = '<i class="bi bi-info-circle me-1"></i>Sin ubicaciones configuradas. Agrégalas con el botón de arriba.';
+        lista.appendChild(p);
+      }
+      showToast(`Ubicación "${nombre}" eliminada`, 'success');
+    } else {
+      showToast(d.error || 'Error al eliminar ubicación', 'error');
+    }
+  });
+}
+
+// ─── Funciones QR ────────────────────────────────────────────────────────────
+// El QR se genera en el backend (Python qrcode) y llega como base64 inline.
+// No se necesita ninguna librería JS de generación de QR.
+
+// Muestra el QR de la mesa en el modal junto con la URL de bienvenida.
+function showQR(base64Data, mesaId) {
+    const base = window.location.origin;
+    const qrUrl = `${base}/bienvenida/?mesa=${mesaId}`;
+    
+    document.getElementById('qrTitle').textContent = `QR Mesa ${mesaId}`;
+    document.getElementById('qrUrl').textContent = qrUrl;
+    
+    const qrImg = document.getElementById('qrModalImg');
+    if (qrImg) {
+        qrImg.src = `data:image/png;base64,${base64Data}`;
+    }
+    
+    new bootstrap.Modal(document.getElementById('qrModal')).show();
+}
+
+// Descarga la imagen del QR como archivo PNG usando un enlace temporal.
+function downloadQR() {
+    const img = document.getElementById('qrModalImg');
+    const a = document.createElement('a');
+    const title = document.getElementById('qrTitle').textContent.replace('QR Mesa ', '');
+    a.download = `qr-mesa-${title}.png`;
+    a.href = img.src;
+    a.click();
+}
+
+// ─── Modal de recorte de imagen (Cropper.js) ─────────────────────────────────
+// Soporta ratios fijos por contexto (producto 4:3, promo 3:1) y modo libre para galería.
+// El preview en vivo se actualiza en todos los elementos .cropper-preview-mm del DOM.
+const CROP_RATIOS = {
+  '4:3':  4/3,
+  '3:1':  3/1,
+  '16:9': 16/9,
+  '1:1':  1,
+  'libre': NaN,
+};
+let _cropper        = null;
+let _cropOnConfirm  = null;
+let _cropFileName   = 'imagen.jpg';
+let _cropFileType   = 'image/jpeg';
+let _cropAspectKey  = '4:3';
+let _cropContextKey = 'galeria';
+
+const CROP_CONTEXT_LABELS = {
+  producto: 'en el menú',
+  promo:    'en el carrusel',
+  galeria:  '(libre)',
+};
+// Por contexto, qué ratio se usa por defecto al cambiar de chrome.
+const CROP_CONTEXT_DEFAULT_ASPECT = {
+  producto: '4:3',
+  promo:    '3:1',
+  galeria:  'libre',
+};
+
+// Convierte una clave de ratio ('4:3', 'libre', etc.) al valor numérico de Cropper.js.
+function _parseAspect(key) {
+  return CROP_RATIOS[key] !== undefined ? CROP_RATIOS[key] : 4/3;
+}
+
+// Oculta todos los paneles de preview y muestra solo el correspondiente al contexto activo.
+function _mostrarChromeContext(ctx) {
+  document.querySelectorAll('.crop-context-pane').forEach(p => p.style.display = 'none');
+  const pane = document.getElementById('cropCtx-' + ctx);
+  if (pane) pane.style.display = '';
+  const lbl = document.getElementById('cropCtxName');
+  if (lbl) lbl.textContent = CROP_CONTEXT_LABELS[ctx] || '';
+}
+
+// Abre el modal de Cropper.js con el archivo dado.
+// Inicializa Cropper al terminar la animación de Bootstrap (evento shown.bs.modal).
+// Destruye la instancia al cerrar el modal para liberar recursos.
+function abrirRecorte(file, { aspect = '4:3', aspectLabel = '', context = 'galeria', onConfirm } = {}) {
+  if (typeof Cropper === 'undefined') {
+    // Fallback: si no se cargó la librería, sube sin recortar
+    onConfirm?.(file, file.name);
+    return;
+  }
+  _cropOnConfirm  = onConfirm;
+  _cropFileName   = file.name || 'imagen.jpg';
+  _cropFileType   = file.type || 'image/jpeg';
+  _cropAspectKey  = aspect;
+  _cropContextKey = context;
+
+  _mostrarChromeContext(context);
+
+  const lbl = document.getElementById('cropAspectInfo');
+  if (lbl) lbl.textContent = aspectLabel || `Proporción: ${aspect}`;
+  const btnLbl = document.getElementById('cropAspectLbl');
+  if (btnLbl) btnLbl.textContent = aspect;
+
+  const reader = new FileReader();
+  reader.onload = e => {
+    const img = document.getElementById('cropSource');
+    img.src = e.target.result;
+    const modalEl = document.getElementById('cropModal');
+    const modal   = new bootstrap.Modal(modalEl);
+    modal.show();
+
+    // Cropper requiere que la imagen esté en el DOM visible — inicializa al
+    // terminar la animación de Bootstrap.
+    modalEl.addEventListener('shown.bs.modal', function _onShown() {
+      modalEl.removeEventListener('shown.bs.modal', _onShown);
+      if (_cropper) { try { _cropper.destroy(); } catch(_){} _cropper = null; }
+      const ratio = _parseAspect(_cropAspectKey);
+      _cropper = new Cropper(img, {
+        aspectRatio: ratio,
+        viewMode: 1,
+        autoCropArea: 0.92,
+        background: false,
+        responsive: true,
+        zoomable: true,
+        movable: true,
+        // Cropper.js actualiza TODOS los elementos que matcheen este selector,
+        // sin importar si están visibles. Así, cambiar de chrome es instantáneo.
+        preview: '.cropper-preview-mm',
+        crop(event) {
+          const w = Math.round(event.detail.width);
+          const h = Math.round(event.detail.height);
+          const info = document.getElementById('cropSizeInfo');
+          if (info) info.textContent = `Recorte: ${w} × ${h} px`;
+        },
+      });
+    });
+
+    // Destruir cropper al cerrar
+    modalEl.addEventListener('hidden.bs.modal', function _onHide() {
+      modalEl.removeEventListener('hidden.bs.modal', _onHide);
+      if (_cropper) { try { _cropper.destroy(); } catch(_){} _cropper = null; }
+    });
+  };
+  reader.readAsDataURL(file);
+}
+
+// Ejecuta acciones del toolbar de Cropper.js (rotar, zoom, voltear, resetear).
+function cropApi(accion, val) {
+  if (!_cropper) return;
+  switch (accion) {
+    case 'rotate':  _cropper.rotate(val); break;
+    case 'zoomIn':  _cropper.zoom(0.1); break;
+    case 'zoomOut': _cropper.zoom(-0.1); break;
+    case 'flipH':   _cropper.scaleX(-(_cropper.getData().scaleX || 1)); break;
+    case 'flipV':   _cropper.scaleY(-(_cropper.getData().scaleY || 1)); break;
+    case 'reset':   _cropper.reset(); break;
+  }
+}
+
+// Cicla entre todos los ratios disponibles; advierte visualmente si el ratio
+// elegido no coincide con el esperado para el contexto actual.
+function cropToggleAspect() {
+  // Cicla entre los ratios disponibles
+  if (!_cropper) return;
+  const keys = ['4:3','3:1','16:9','1:1','libre'];
+  const idx  = keys.indexOf(_cropAspectKey);
+  _cropAspectKey = keys[(idx + 1) % keys.length];
+  const r = _parseAspect(_cropAspectKey);
+  _cropper.setAspectRatio(r);
+  document.getElementById('cropAspectLbl').textContent = _cropAspectKey;
+  document.getElementById('cropAspectInfo').textContent =
+    _cropAspectKey === 'libre' ? 'Proporción libre' : `Proporción: ${_cropAspectKey}`;
+  // Aviso visual cuando el ratio NO coincide con el del chrome del contexto.
+  const expected = CROP_CONTEXT_DEFAULT_ASPECT[_cropContextKey];
+  const info = document.getElementById('cropSizeInfo');
+  if (expected && _cropAspectKey !== expected && info) {
+    info.textContent += `  (el ${_cropContextKey} se ve mejor en ${expected})`;
+  }
+}
+
+// Extrae el canvas recortado, lo convierte a Blob con la calidad/formato adecuado
+// y llama al callback onConfirm para subir el resultado al servidor.
+async function cropConfirmar() {
+  if (!_cropper) return;
+  const btn = document.getElementById('cropConfirmBtn');
+  btn.disabled = true;
+  const oldHtml = btn.innerHTML;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Subiendo…';
+
+  // Salida JPEG con calidad 0.9. Para PNGs con transparencia usamos PNG.
+  const mime = (_cropFileType === 'image/png' || _cropFileType === 'image/webp')
+    ? _cropFileType : 'image/jpeg';
+  const calidad = mime === 'image/jpeg' ? 0.9 : 1;
+
+  // Limitar tamaño máximo del canvas (4000px del lado mayor) para evitar
+  // archivos enormes innecesariamente.
+  const canvas = _cropper.getCroppedCanvas({
+    maxWidth: 4000, maxHeight: 4000,
+    imageSmoothingQuality: 'high',
+  });
+
+  canvas.toBlob(async (blob) => {
+    if (!blob) {
+      showToast?.('No se pudo generar la imagen recortada', 'error');
+      btn.disabled = false;
+      btn.innerHTML = oldHtml;
+      return;
+    }
+    const ext = mime === 'image/png' ? '.png' : (mime === 'image/webp' ? '.webp' : '.jpg');
+    const base = (_cropFileName || 'imagen').replace(/\.[^/.]+$/, '');
+    const nombre = base + ext;
+    try {
+      await _cropOnConfirm?.(blob, nombre);
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = oldHtml;
+      bootstrap.Modal.getInstance(document.getElementById('cropModal'))?.hide();
+    }
+  }, mime, calidad);
+}
+</script>
+{% endblock %}
